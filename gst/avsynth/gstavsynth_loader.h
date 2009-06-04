@@ -1,0 +1,65 @@
+
+#ifndef __GST_AVSYNTH_LOADER_H__
+#define __GST_AVSYNTH_LOADER_H__
+
+#include "gstavsynth.h"
+#include "gstavsynth_sdk.h"
+#include "gstavsynth_videofilter.h"
+
+typedef const char* (__stdcall *AvisynthPluginInitFunc)(IScriptEnvironment* env);
+
+/* This class implements only a few methods,
+ * and is only used to pre-scan plugins
+ */
+class LoaderScriptEnvironment : public IScriptEnvironment
+{
+public:
+  LoaderScriptEnvironment();
+  void __stdcall AddFunction(const char* name, const char* paramstr, const char* srccapstr, const char* sinkcapstr, IScriptEnvironment::ApplyFunc apply, void* user_data=0);
+  //bool __stdcall FunctionExists(const char* name);
+  __stdcall ~LoaderScriptEnvironment();
+
+  void __stdcall CheckVersion(int version) {};
+  long __stdcall GetCPUFlags() { return NULL; };
+  char* __stdcall SaveString(const char* s, int length = -1) { return NULL; };
+  char* __stdcall Sprintf(const char* fmt, ...) { return NULL; };
+  char* __stdcall VSprintf(const char* fmt, void* val) { return NULL; };
+  void __stdcall ThrowError(const char* fmt, ...) {};
+  bool __stdcall FunctionExists(const char* name) { return false; };
+  AVSValue __stdcall Invoke(const char* name, const AVSValue args, const char** arg_names=0) { return NULL; };
+  AVSValue __stdcall GetVar(const char* name) { return NULL; };
+  bool __stdcall SetVar(const char* name, const AVSValue& val) { return false; };
+  bool __stdcall SetGlobalVar(const char* name, const AVSValue& val) { return false; };
+  void __stdcall PushContext(int level=0) {};
+  void __stdcall PopContext() {};
+  void __stdcall PopContextGlobal() {};
+  PVideoFrame __stdcall NewVideoFrame(const VideoInfo& vi, int align) { return NULL; };
+  PVideoFrame NewVideoFrame(int row_size, int height, int align) { return NULL; };
+  PVideoFrame NewPlanarVideoFrame(int width, int height, int align, bool U_first) { return NULL; };
+  bool __stdcall MakeWritable(PVideoFrame* pvf) { return false; };
+  void __stdcall BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height) {};
+  void __stdcall AtExit(IScriptEnvironment::ShutdownFunc function, void* user_data) {};
+  PVideoFrame __stdcall Subframe(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height) { return NULL; };
+  int __stdcall SetMemoryMax(int mem) { return NULL; };
+  int __stdcall SetWorkingDir(const char * newdir) { return NULL; };
+  void* __stdcall ManageCache(int key, void* data) { return NULL; }; 
+  bool __stdcall PlanarChromaAlignment(IScriptEnvironment::PlanarChromaAlignmentMode key) { return false; };
+  PVideoFrame __stdcall SubframePlanar(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV) { return NULL; };
+
+  void SetFilename (gchar *name);
+  void SetPrefix (gchar *prefix);
+  void SetPlugin (GstPlugin *plug);
+
+private:
+  /* GStreamer plugin that registers the type */
+  GstPlugin *plugin;
+  /* Path to the plugin module (UTF-8) */
+  gchar *filename;
+  /* Prefix for full names*/
+  gchar *fullnameprefix;
+
+};
+
+gboolean gst_avsynth_video_filter_register (GstPlugin * plugin);
+
+#endif //__GST_AVSYNTH_LOADER_H__

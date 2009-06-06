@@ -1,21 +1,28 @@
-/* GStreamer
- * Copyright (C) <1999> Erik Walthinsen <omega@cse.ogi.edu>
- * Copyright (C) <2009> LRN <lrn1986 _at_ gmail _dot_ com>
+/*
+ * GStreamer:
+ * Copyright (C) 1999 Erik Walthinsen <omega@cse.ogi.edu>
  *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * AviSynth:
+ * Copyright (C) 2007 Ben Rudiak-Gould et al.
  *
- * This library is distributed in the hope that it will be useful,
+ * GstAVSynth:
+ * Copyright (C) 2009 LRN <lrn1986 _at_ gmail _dot_ com>
+ *
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public
- * License along with this library; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA, or visit
+ * http://www.gnu.org/copyleft/gpl.html .
  */
 
 #ifdef HAVE_CONFIG_H
@@ -63,7 +70,7 @@ gst_avsynth_video_filter_base_init (GstAVSynthVideoFilterClass * klass)
   details.klass = g_strdup_printf ("Effect/Video");
   details.description = g_strdup_printf ("AVSynth video filter %s - %s (%s)",
       params->name, params->filename, params->params);
-  details.author = "Author of the plugin, "
+  details.author = (gchar *) "Author of the plugin, "
       "LRN <lrn1986 _at_ gmail _dot_ com>";
   gst_element_class_set_details (element_class, &details);
   g_free (details.longname);
@@ -81,6 +88,10 @@ gst_avsynth_video_filter_base_init (GstAVSynthVideoFilterClass * klass)
 
   klass->srctempl = srctempl;
   klass->sinktempl = sinktempl;
+  klass->filename = params->filename;
+  klass->name = params->name;
+  klass->fullname = params->fullname;
+  klass->params = params->params;
 }
 
 void
@@ -135,14 +146,27 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter)
 {
   AvisynthPluginInitFunc init_func = NULL;
   GstAVSynthVideoFilterClass *oclass;
+  gchar *full_filename = NULL;
 
   oclass = (GstAVSynthVideoFilterClass *) (G_OBJECT_GET_CLASS (avsynth_video_filter));
 
   avsynth_video_filter->env = new ScriptEnvironment(avsynth_video_filter);
 
-  avsynth_video_filter->plugin = g_module_open (oclass->filename, (GModuleFlags) 0);
+  full_filename = g_filename_from_utf8 (oclass->filename, -1, NULL, NULL, NULL);
+
+  avsynth_video_filter->plugin = g_module_open (full_filename, (GModuleFlags) G_MODULE_BIND_LAZY);
+
+  g_free (full_filename);
+  
+  GST_LOG ("Getting AvisynthPluginInit2...");
   if (!g_module_symbol (avsynth_video_filter->plugin, "AvisynthPluginInit2", (gpointer *) &init_func))
-    g_module_symbol (avsynth_video_filter->plugin, "AvisynthPluginInit2@4", (gpointer *) &init_func);
+  {
+    GST_LOG ("Failed. Getting AvisynthPluginInit2@4...");
+    if (!g_module_symbol (avsynth_video_filter->plugin, "AvisynthPluginInit2@4", (gpointer *) &init_func))
+    {
+      GST_ERROR ("Failed. Something is wrong here...");
+    }
+  }
 
   init_func (avsynth_video_filter->env);
 
@@ -207,7 +231,7 @@ gboolean
 gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
 {
   GstAVSynthVideoFilter *avsynth_video_filter;
-  GstPad *peer;
+//  GstPad *peer;
   gboolean res;
 
   avsynth_video_filter = (GstAVSynthVideoFilter *) gst_pad_get_parent (pad);
@@ -280,9 +304,9 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
 {
   GstAVSynthVideoFilter *avsynth_video_filter;
   GstAVSynthVideoFilterClass *oclass;
-  GstStructure *structure;
-  const GValue *par;
-  const GValue *fps;
+//  GstStructure *structure;
+//  const GValue *par;
+//  const GValue *fps;
   gboolean ret = TRUE;
 
   avsynth_video_filter = (GstAVSynthVideoFilter *) (gst_pad_get_parent (pad));
@@ -294,6 +318,7 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
 
   /* TODO: filter reinitialization (for new caps) */
   /*
+  A reminder: this is a ripoff from gst-ffmpeg
   // close old session
   gst_avsynth_video_filter_close (avsynth_video_filter);
 

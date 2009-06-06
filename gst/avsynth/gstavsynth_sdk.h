@@ -1,46 +1,49 @@
 /*
- * This is a modified avisynth.h for GstAVSynth GStreamer element,
- * original avisynth.h was taken from AviSynth v2.58.
- * This file is covered by the same license as the original (see below).
- * Copyright 2009 LRN <lrn1986 _at_ gmail _dot_ com>
+ * GStreamer:
+ * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
+ * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
+ *
+ * AviSynth:
+ * Copyright (C) 2007 Ben Rudiak-Gould et al.
+ *
+ * GstAVSynth:
+ * Copyright (C) 2009 LRN <lrn1986 _at_ gmail _dot_ com>
+ *
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA, or visit
+ * http://www.gnu.org/copyleft/gpl.html .
  */
-
-// Avisynth v2.5.  Copyright 2002 Ben Rudiak-Gould et al.
-// http://www.avisynth.org
-
-// This program is free software; you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation; either version 2 of the License, or
-// (at your option) any later version.
 //
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program; if not, write to the Free Software
-// Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA, or visit
-// http://www.gnu.org/copyleft/gpl.html .
-//
-// Linking Avisynth statically or dynamically with other modules is making a
-// combined work based on Avisynth.  Thus, the terms and conditions of the GNU
+// Linking GstAVSynth statically or dynamically with other modules is making a
+// combined work based on GstAVSynth.  Thus, the terms and conditions of the GNU
 // General Public License cover the whole combination.
 //
-// As a special exception, the copyright holders of Avisynth give you
-// permission to link Avisynth with independent modules that communicate with
+// As a special exception, the copyright holders of GstAVSynth give you
+// permission to link GstAVSynth with independent modules that communicate with
 // Avisynth solely through the interfaces defined in avisynth.h, regardless of the license
 // terms of these independent modules, and to copy and distribute the
 // resulting combined work under terms of your choice, provided that
 // every copy of the combined work is accompanied by a complete copy of
-// the source code of Avisynth (the version of Avisynth used to produce the
+// the source code of Avisynth (the version of GstAVSynth used to produce the
 // combined work), being distributed under the terms of the GNU General
 // Public License plus this exception.  An independent module is a module
-// which is not derived from or based on Avisynth, such as 3rd-party filters,
+// which is not derived from or based on GstAVSynth, such as 3rd-party filters,
 // import and export plugins, or graphical user interfaces.
 
-#ifndef __AVISYNTH_H__
-#define __AVISYNTH_H__
+#ifndef __GSTAVSYNTH_SDK_H__
+#define __GSTAVSYNTH_SDK_H__
 
 enum { AVISYNTH_INTERFACE_VERSION = 3 };
 
@@ -323,8 +326,8 @@ struct VideoInfo {
 class VideoFrameBuffer {
 
 protected:
-  BYTE* data;
   int refcount;
+  BYTE* data;
   int data_size;
   // sequence_number is incremented every time the buffer is changed, so
   // that stale views can tell they're no longer valid.
@@ -372,10 +375,10 @@ protected:
   int refcount;
 
   VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height):
-    vfb(_vfb), offset(_offset), pitch(_pitch), row_size(_row_size), height(_height), offsetU(_offset), offsetV(_offset), pitchUV(0)
+    offset(_offset), pitch(_pitch), row_size(_row_size), height(_height), offsetU(_offset), offsetV(_offset), pitchUV(0), vfb(_vfb)
   {}
   VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV):
-    vfb(_vfb), offset(_offset), pitch(_pitch), row_size(_row_size), height(_height), offsetU(_offsetU), offsetV(_offsetV), pitchUV(_pitchUV)
+    offset(_offset), pitch(_pitch), row_size(_row_size), height(_height), offsetU(_offsetU), offsetV(_offsetV), pitchUV(_pitchUV), vfb(_vfb)
   {}
 
   /* Not yet overloaded in GstAVSynth */
@@ -411,8 +414,8 @@ public:
   int GetOffset(int plane) const { switch (plane) {case PLANAR_U: return offsetU;case PLANAR_V: return offsetV;default: return offset;}; }
 
   // in plugins use env->SubFrame()
-  virtual VideoFrame* Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height) const {};
-  virtual VideoFrame* Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int pitchUV) const {};
+  virtual VideoFrame* Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height) const { return 0; };
+  virtual VideoFrame* Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int pitchUV) const { return 0; };
 
 
   const BYTE* GetReadPtr() const { return vfb->GetReadPtr() + offset; }
@@ -805,4 +808,4 @@ public:
 
 #pragma pack(pop)
 
-#endif //__AVISYNTH_H__
+#endif //__GSTAVSYNTH_SDK_H__

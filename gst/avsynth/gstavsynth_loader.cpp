@@ -1,8 +1,36 @@
+/*
+ * GStreamer:
+ * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
+ * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
+ *
+ * AviSynth:
+ * Copyright (C) 2007 Ben Rudiak-Gould et al.
+ *
+ * GstAVSynth:
+ * Copyright (C) 2009 LRN <lrn1986 _at_ gmail _dot_ com>
+ *
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA, or visit
+ * http://www.gnu.org/copyleft/gpl.html .
+ */
+
 #include "gstavsynth_sdk.h"
 #include "gstavsynth_videofilter.h"
 #include "gstavsynth_loader.h"
 
-gchar *gst_avsynth_get_plugin_directory()
+const gchar *gst_avsynth_get_plugin_directory()
 {
   return "d:\\progs\\gstreamer\\0.10\\lib\\gstreamer-0.10";
 }
@@ -17,11 +45,8 @@ LoaderScriptEnvironment::FunctionExists(const char* func_name)
     return false;
 }
 */
-LoaderScriptEnvironment::LoaderScriptEnvironment()
+LoaderScriptEnvironment::LoaderScriptEnvironment(): plugin(NULL), filename(""), fullnameprefix("")
 {
-  fullnameprefix = "";
-  plugin = NULL;
-  filename = "";
 }
 
 void
@@ -46,7 +71,6 @@ void
 LoaderScriptEnvironment::AddFunction(const char* name, const char* paramstr, const char* srccapstr, const char* sinkcapstr, ApplyFunc apply, void* user_data)
 {
   GstAVSynthVideoFilterClassParams *params;
-  GstCaps *srccaps = NULL, *sinkcaps = NULL;
   gchar *type_name;
   gchar *plugin_name;
 
@@ -93,12 +117,13 @@ LoaderScriptEnvironment::AddFunction(const char* name, const char* paramstr, con
 
   rank = GST_RANK_NONE;
 
-  if (!gst_element_register (plugin, type_name, rank, type)) {
+  if (!gst_element_register (plugin, type_name, rank, type))
     g_warning ("Failed to register %s", type_name);
-    g_free (type_name);
-    return;
-  }
 
+  g_type_set_qdata (type, GST_AVSYNTH_VIDEO_FILTER_PARAMS_QDATA, (gpointer) NULL);
+
+  /* Don't free params contents because class uses them now */
+  g_free (params);
   g_free (type_name);
 }
 
@@ -126,7 +151,7 @@ gst_avsynth_video_filter_register (GstPlugin * plugin)
   else
     GST_LOG ("Module support is present");
 
-  if (!(plugin_dir_name_utf8 = gst_avsynth_get_plugin_directory ()))
+  if (!(plugin_dir_name_utf8 = g_strdup (gst_avsynth_get_plugin_directory ())))
   {
     GST_LOG ("Failed to get plugin directory name");
     goto cleanup;
@@ -208,6 +233,7 @@ gst_avsynth_video_filter_register (GstPlugin * plugin)
         else
           GST_LOG ("g_module_open failed for %s", filename_utf8);
         g_free (full_filename);
+        full_filename = NULL;
       }
       else
         GST_LOG ("%s is not a dll", full_filename_utf8);
@@ -216,7 +242,9 @@ gst_avsynth_video_filter_register (GstPlugin * plugin)
       GST_LOG ("Failed to convert filename %s to native encoding", full_filename_utf8);
 
     g_free (full_filename_utf8);
+    full_filename_utf8 = NULL;
     g_free (filename_utf8);
+    filename_utf8 = NULL;
   }
 
 cleanup:
@@ -228,9 +256,10 @@ cleanup:
   if (plugin_dir)
     g_dir_close (plugin_dir);
 
-  g_free (plugin_dir_name);
-  g_free (plugin_dir_name_utf8);
-  g_free (plugin_dir);
+  if (plugin_dir_name)
+    g_free (plugin_dir_name);
+  if (plugin_dir_name_utf8)
+    g_free (plugin_dir_name_utf8);
 
   GST_LOG ("Finished Registering decoders");
 

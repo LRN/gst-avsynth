@@ -100,6 +100,20 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstElementClass *gstelement_class = GST_ELEMENT_CLASS (klass);
 
+  gint paramstate = -1;
+  /*
+   * -1 - reading '[' (name definition opening)
+   * 0 - reading param name
+   * 1 - reading type
+   * 2 - reading multiplier
+   */
+
+  gchar *paramname = NULL;
+  gint paramnamepos = 0;
+  gchar paramtype = 0;
+  gchar parammult = 0;
+  gboolean newparam = FALSE;
+
   parent_class = (GstElementClass *) g_type_class_peek_parent (klass);
 
   gobject_class->finalize = gst_avsynth_video_filter_finalize;
@@ -107,36 +121,231 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
   gobject_class->set_property = gst_avsynth_video_filter_set_property;
   gobject_class->get_property = gst_avsynth_video_filter_get_property;
 
-  /* TODO: parse param string and map its contents to GObject properties */
-  /*
-    g_object_class_install_property (gobject_class, PROP_SKIPFRAME,
-        g_param_spec_enum ("skip-frame", "Skip frames",
-            "Which types of frames to skip during decoding",
-            GST_FFMPEGDEC_TYPE_SKIPFRAME, 0,
-            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-    g_object_class_install_property (gobject_class, PROP_LOWRES,
-        g_param_spec_enum ("lowres", "Low resolution",
-            "At which resolution to decode images", GST_FFMPEGDEC_TYPE_LOWRES,
-            0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-    g_object_class_install_property (gobject_class, PROP_DIRECT_RENDERING,
-        g_param_spec_boolean ("direct-rendering", "Direct Rendering",
-            "Enable direct rendering", DEFAULT_DIRECT_RENDERING,
-            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-    g_object_class_install_property (gobject_class, PROP_DO_PADDING,
-        g_param_spec_boolean ("do-padding", "Do Padding",
-            "Add 0 padding before decoding data", DEFAULT_DO_PADDING,
-            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-    g_object_class_install_property (gobject_class, PROP_DEBUG_MV,
-        g_param_spec_boolean ("debug-mv", "Debug motion vectors",
-            "Whether ffmpeg should print motion vectors on top of the image",
-            DEFAULT_DEBUG_MV, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-#if 0
-    g_object_class_install_property (gobject_class, PROP_CROP,
-        g_param_spec_boolean ("crop", "Crop",
-            "Crop images to the display region",
-            DEFAULT_CROP, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-#endif
-  */
+  /* Param-string consists of one or more elements, each element has the following format:
+   * <['['name']']type[multiplier]>
+   * where
+   * optional [name] token - parameter name (for named parameters)
+   * mandatory type token - parameter type, a single letter that could be:
+   *   'b'oolean, 'i'nteger, 'f'loat, 'c'lip, 's'tring or '.' (for untyped parameter)
+   * optional multiplier token - either '+' or '*', meaning 'one or more arguments'
+   *   or 'zero or more arguments' of the specified type
+   * Examples:
+   *   ci*s - one clip, zero or more integers, one string
+   *   [clip1]c[threshold]i[mask]c - one clip (named "clip1"), one integer (named "threshold"),
+   *     one clip (named "mask")
+   *
+   * GstAVSynth-specific:
+   * each parameter is mapped to an object property
+   * each parameter must be named (because we can't have unnamed object properties)
+   * multiple (with + or *) parameters are mapped to one array property, which takes
+   *   a list of comma-separated arguments or an array of arguments
+   * GstAVSynth removes clip arguments and maps each one to a sink pad
+   */
+
+  klass->properties = g_array_new (FALSE, TRUE, sizeof (AVSynthVideoFilterParam));
+
+  /* This is a kind of Turing machine...i think... 
+   * Goes through each character in param string.
+   */
+  for (gchar *params = klass->params; params; params++)
+  {
+    /* Depending on the machine state ... */
+    switch (paramstate)
+    {
+      case -1: /* Ready to read a new param group */
+      {
+        switch (params[0]) /* What character do we have here... */
+        {
+          case '[': /* It's a beginning of an optional [paramname] part of a group */
+          {
+            paramstate = 0;
+            paramnamepos = 0;
+            
+            /* Find a closing ']' to calculate the name length */
+            for (gchar *nameptr = params++; nameptr[0] != ']'; namestart++)
+            {
+              /* we've reached the null terminator, param string is broken */            
+              if (!nameptr)
+                GST_ERROR ("Broken AviSynth param string - no trailing ']'");
+              paramnamepos++;
+            }
+            paramname = g_new0 (gchar, ++paramnamepos);
+            paramnamepos = 0;
+            break;
+          }
+          case 'b': /* There is no name, i.e. a type goes right away */
+          case 'i':
+          case 'f':
+          case 'c':
+          case 's':
+          case '.':
+          {
+            /* Change the state to 'read type' and make sure we re-enter this position */
+            paramstate = 1;
+            params--;
+            break;
+          }
+          default:
+          {
+            GST_ERROR ("Broken AviSynth param string, unexpected character '%c'", params[0]);
+          }
+        }
+        break;
+      }
+      case 0: /* Reading a name */
+      {
+        switch (params[0]):
+        {
+          case ']': /* Done reading the name (no length check here, we've done it in state -1) */
+          {
+            paramstate = 1;
+            break;
+          }
+          default: /* Let's hope that AviSynth is more restrictive in what characters are allowed to be in a name than GObject is */
+          {
+            paramname[paramnamelen++] = params[0];
+          }
+        }
+      }
+      case 1: /* Reading a type */
+      {
+        switch (params[0])
+        {
+          case 'b':
+          case 'i':
+          case 'f':
+          case 'c':
+          case 's':
+          case '.':
+          {
+            /* Save the type and change state to 'reading multiplier' */
+            paramtype = params[0];
+            paramstate = 2;
+            break;
+          }
+          default:
+          {
+            GST_ERROR ("Broken AviSynth param string - '%c' is not a type", params[0]);
+          }
+        }
+        break;
+      }
+      case 2: /* Reading a multiplier */
+      {
+        switch (params[0])
+        {
+          case '+':
+          case '*':
+          {
+            /* Save the multiplier and reset the machine */
+            parammult = params[0];
+            paramstate = -1;
+            newparam = TRUE;
+            break;
+          }
+          case '[':
+          {
+            /* No multiplier, but a beginning of a new group (param name) */
+            paramstate = -1;
+            params--;
+            newparam = TRUE;
+            break;
+          }
+          case 'b':
+          case 'i':
+          case 'f':
+          case 'c':
+          case 's':
+          case '.':
+          {
+            /* No multiplier, but a beginning of a new group (param type) */
+            paramstate = 1;
+            params--;
+            newparam = TRUE;
+            break;
+          }
+          default:
+          {
+            GST_ERROR ("Broken AviSynth param string");
+          }
+        }
+      }
+    }
+    /* We've finished reading a group */
+    if (newparam)
+    {
+      AVSynthVideoFilterParam *paramstr = NULL;
+      GParamSpec *paramspec = NULL;
+      /* FIXME: make all params construct-time-only? Because they are...right? */
+      GParamFlags paramflags = (GParamFlags) G_PARAM_READABLE |
+        G_PARAM_WRITABLE | G_PARAM_STATIC_NICK |
+        G_PARAM_STATIC_BLURB);
+
+      paramstr = g_new0 (AVSynthVideoFilterParam, 1);
+      newparam = FALSE;
+
+      if (paramname == NULL)
+      {
+        /* The property is not named - create a name */
+        if (paramtype == 'c')
+          paramname = g_strdup_printf ("sink%d", properties->len);
+        else if (parammult == 0)
+          paramname = g_strdup_printf ("param%d", properties->len);
+        else
+          paramname = g_strdup_printf ("paramelement%d", properties->len);
+        paramstr->param_name = paramname;
+      }
+
+      switch (paramtype)
+      {
+        case 'b':
+          paramspec = g_param_spec_boolean (paramname, "", "",
+              FALSE, paramflags);
+          break;
+        case 'i':
+          paramspec = g_param_spec_int (paramname, "", "",
+              G_MININT, G_MAXINT, G_MININT, paramflags);
+          break;
+        case 'f':
+          paramspec = g_param_spec_float (paramname, "", "",
+              G_MINFLOAT, G_MAXFLOAG, G_MINFLOAG, paramflags);
+          break;
+        case 'c':
+          break;
+        case 's':
+          paramspec = g_param_spec_string (paramname, "", "",
+              "", paramflags);
+          break;
+        case '.':
+          GST_ERROR ("Sorry, but i have not yet figured a way to implement "
+                     "untyped params");
+          break;
+      }
+      paramstr->param_type = paramtype;
+
+      if (paramspec && parammult == 0)
+      {
+        g_object_class_install_property (gobject_class, properties->len,
+          paramspec);
+      }
+      else if (paramspec && parammult == '+')
+      {
+        GParamSpec *paramspec_array;
+        gchar *paramname_array;
+        paramname_array = g_strdup_printf ("param%d", properties->len);
+        paramspec_array = g_param_spec_value_array (paramname_array,
+            "", "", paramspec, paramflags);
+        g_object_class_install_property (gobject_class, properties->len,
+          paramspec_array);
+      }
+      klass->params = g_list_append (klass->params, (gpointer) paramstr);
+
+      parammult = 0;
+      paramname = NULL;
+      paramnamelen = 0;
+      paramtype = 0;
+    }
+  }
 
   gstelement_class->change_state = gst_avsynth_video_filter_change_state;
 }
@@ -170,29 +379,9 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter)
 
   init_func (avsynth_video_filter->env);
 
-  /* Param-string consists of one or more elements, each element has the following format:
-   * <['['name']']type[multiplier]>
-   * where
-   * optional [name] token - parameter name (for named parameters)
-   * mandatory type token - parameter type, a single letter that could be:
-   *   'b'oolean, 'i'nteger, 'f'loat, 'c'lip, 's'tring or '.' (for untyped parameter)
-   * optional multiplier token - either '+' or '*', meaning 'one or more arguments'
-   *   or 'zero or more arguments' of the specified type
-   * Examples:
-   *   ci*s - one clip, zero or more integers, one string
-   *   [clip1]c[threshold]i[mask]c - one clip (named "clip1"), one integer (named "threshold"),
-   *     one clip (named "mask")
-   *
-   * GstAVSynth-specific:
-   * each parameter is mapped to an object property
-   * each parameter must be named (because we can't have unnamed object properties)
-   * multiple (with + or *) parameters are mapped to one array property, which takes
-   *   a list of comma-separated arguments or an array of arguments
-   * GstAVSynth removes clip arguments and maps each one to a sink pad
-   */
 //  oclass->params
   /* setup pads */
-  /* TODO: parse param string and map its clip arguments to sinkpads */
+  /* TODO: run through klass->params and create a pad for each 'c' param */
   /*
   avsynth_video_filter->sinkpad = gst_pad_new_from_template (oclass->sinktempl, "sink");
   gst_pad_set_setcaps_function (avsynth_video_filter->sinkpad,
@@ -805,6 +994,7 @@ gst_avsynth_video_filter_set_property (GObject * object,
     guint prop_id, const GValue * value, GParamSpec * pspec)
 {
   GstAVSynthVideoFilter *avsynth_video_filter = (GstAVSynthVideoFilter *) object;
+  GstAVSynthVideoFilterClass *filter_class = G_OBJECT_GET_CLASS (avsynth_video_filter);
 
   switch (prop_id) {
     /* TODO: implement properties */
@@ -841,6 +1031,7 @@ gst_avsynth_video_filter_get_property (GObject * object,
     guint prop_id, GValue * value, GParamSpec * pspec)
 {
   GstAVSynthVideoFilter *avsynth_video_filter = (GstAVSynthVideoFilter *) object;
+  GstAVSynthVideoFilterClass *filter_class = G_OBJECT_GET_CLASS (avsynth_video_filter);
 
   switch (prop_id) {
     /* TODO: implement properties */

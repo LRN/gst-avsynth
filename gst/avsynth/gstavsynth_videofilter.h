@@ -68,6 +68,14 @@ struct _GstAVSynthVideoFilter
   GstSegment segment;
 };
 
+struct AVSynthVideoFilterParam
+{
+  gint param_id;
+  gchar *param_name;
+  gchar param_type;
+  gchar param_mult;
+};
+
 struct _GstAVSynthVideoFilterClass
 {
   GstElementClass parent_class;
@@ -83,6 +91,8 @@ struct _GstAVSynthVideoFilterClass
   const gchar *params;
 
   GstPadTemplate *srctempl, *sinktempl;
+
+  GArray /*of AVSynthVideoFilterParam*/ *properties;
 };
 
 struct _GstAVSynthVideoFilterClassParams

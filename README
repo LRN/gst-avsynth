@@ -1,34 +1,122 @@
 WHAT IT IS
 ----------
 
-gst-plugin is a template for writing your own GStreamer plug-in.
+This is a GStreamer plugin you can compile AviSynth filters against to 
+use in GStreamer.
 
-The code is deliberately kept simple so that you quickly understand the basics
-of how to set up autotools and your source tree.
+WHERE TO START
+--------------
 
-This template demonstrates :
-- what to do in autogen.sh
-- how to setup configure.ac (your package name and version, GStreamer flags)
-- how to setup your source dir 
-- what to put in Makefile.am
+You should be familiar with GStreamer:
+http://gstreamer.freedesktop.org/
 
-More features and templates might get added later on.
+You should start by going through its FAQ at
+http://gstreamer.freedesktop.org/data/doc/gstreamer/head/faq/html/
 
-HOW TO USE IT
--------------
+There is more documentation; go to
+http://gstreamer.freedesktop.org/documentation
 
-To use it, either make a copy for yourself and rename the parts or use the
-make_element script in tools. To create sources for "myfilter" based on the
-"gsttransform" template run:
+You should also take a look at AviSynth:
+http://www.avisynth.org
+Just remember that GstAVSynth doesn't support scripting.
 
-cd src;
-../tools/make_element myfilter gsttransform
+And finally you may find some useful things (including bug tracker
+and wiki) at GstAVSynth GitHub site:
+http://github.com/LRN/gst-avsynth
 
-This will create gstmyfilter.c and gstmyfilter.h. Open them in an editor and
-start editing. There are several occurances of the string "template", update
-those with real values. The plugin will be called 'myfilter' and it will have
-one element called 'myfilter' too. Also look for "FIXME:" markers that point you
-to places where you need to edit the code.
+You could try to ask around on IRC - #gstreamer on irc.freenode.org
+                                     #avisynth on irc.freenode.org
 
-You still need to adjust the Makefile.am.
+GstAVSynth 0.10 series
+---------------------
 
+It's not really 0.10.0, but it would have been weird to have gstreamer-0.10.0,
+gst-plugins-base-0.10.0 AND gst-avsynth-0.0.1 ... Right?
+
+GstAVSynth is a plugin that isn't really a plugin. Basically it's a shallow
+re-implementation of the famous AviSynth frameserver, time time - based on
+GStreamer multimedia framework. That is, it's not tied to Windows or AVIFile
+anymore. It's shallow - because it doesn't have scripting support and lacks
+some of the features that made AviSynth so good. Still, if you want to take
+an old AviSynth filter and turn it into a GStreamer element to work in a
+GStreamer pipeline, then GstAVSynth is just the thing you need.
+
+
+PLATFORMS
+---------
+
+GstAVSynth itself should work everywhere GStreamer works (which means
+Linux, Windows, MacOSX, FreeBSD, Solaris). AviSynth plugins are usually
+written as Windows-only, and regardless of what GstAVSynth does to help you,
+each plugin will require some effort (ranging from negligible to garganutian)
+to port.
+
+
+INSTALLING FROM PACKAGES
+------------------------
+
+There is no GstAVSynth packages at the moment.
+
+COMPILING FROM SOURCE TARBALLS
+------------------------------
+
+There is no GstAVSynth source tarballs either.
+
+COMPILING FROM GIT
+------------------
+
+When building from git sources, you will need to run autogen.sh to generate 
+the build system files.
+
+You will need a set of additional tools typical for building from git,
+including:
+- autoconf
+- automake
+- libtool
+
+autogen.sh will check for recent enough versions and complain if you don't have
+them.  You can also specify specific versions of automake and autoconf with
+--with-automake and --with-autoconf
+
+Check autogen.sh options by running autogen.sh --help
+
+autogen.sh can pass on arguments to configure - you just need to separate them
+from autogen.sh with -- between the two.
+prefix has been added to autogen.sh but will be passed on to configure because
+some build scripts like that.
+
+When you have done this once, you can use autoregen.sh to re-autogen with
+the last passed options as a handy shortcut.  Use it.
+
+After the autogen.sh stage, you can follow the directions listed in
+"COMPILING FROM SOURCE"
+
+PLUG-IN DEPENDENCIES AND LICENSES
+---------------------------------
+
+GStreamer is developed under the terms of the LGPL (see LICENSE file for
+details). Some of the GStreamer plug-ins however rely on libraries which are
+available under other licenses. This means that if you are distributing an
+application which has a non-GPL compatible license (for instance a closed-source
+application) with GStreamer, you have to make sure not to distribute GPL-linked
+plug-ins.
+
+When using GPL-linked plug-ins, GStreamer is for all practical reasons
+under the GPL itself.
+
+AviSynth is strictly GPL, with a clause that allows you to write non-GPL plugins.
+
+GstAVSynth is based on AviSynth sources (partially), and because of that it is
+still licensed under the terms of the GPL. An effort is (and will be) made to
+both re-implement necessary parts under LGPL or convince AviSynth
+developers to relicense necessary parts of AviSynth under LGPL. GstAVSynth
+permits non-GPL filters just as AviSynth does.
+
+HISTORY
+-------
+
+The idea to write an AviSynth filter wrapper for GStreamer was submitted to
+the list of GStreamer Google Summer of Code ideas list on GStreamer wiki
+by bilboed and picked up as a base of GstAVSynth project by LRN. It is
+expected that GstAVSynth will bring AviSynth 3.0 (which is GStreamer-based)
+closer to reality.

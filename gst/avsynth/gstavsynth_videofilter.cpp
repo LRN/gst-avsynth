@@ -136,18 +136,19 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
    *
    * GstAVSynth-specific:
    * each parameter is mapped to an object property
-   * each parameter must be named (because we can't have unnamed object properties)
    * multiple (with + or *) parameters are mapped to one array property, which takes
    *   a list of comma-separated arguments or an array of arguments
    * GstAVSynth removes clip arguments and maps each one to a sink pad
+   * No multiplier support for clips (yet?)
+   * No untyped parameter support (yet?)
    */
 
-  klass->properties = g_array_new (FALSE, TRUE, sizeof (AVSynthVideoFilterParam));
+  klass->properties = g_ptr_array_new ();
 
   /* This is a kind of Turing machine...i think... 
    * Goes through each character in param string.
    */
-  for (gchar *params = klass->params; params; params++)
+  for (gchar *params = (gchar *) klass->params; params; params++)
   {
     /* Depending on the machine state ... */
     switch (paramstate)
@@ -162,7 +163,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
             paramnamepos = 0;
             
             /* Find a closing ']' to calculate the name length */
-            for (gchar *nameptr = params++; nameptr[0] != ']'; namestart++)
+            for (gchar *nameptr = params++; nameptr[0] != ']'; nameptr++)
             {
               /* we've reached the null terminator, param string is broken */            
               if (!nameptr)
@@ -194,7 +195,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
       }
       case 0: /* Reading a name */
       {
-        switch (params[0]):
+        switch (params[0])
         {
           case ']': /* Done reading the name (no length check here, we've done it in state -1) */
           {
@@ -203,7 +204,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
           }
           default: /* Let's hope that AviSynth is more restrictive in what characters are allowed to be in a name than GObject is */
           {
-            paramname[paramnamelen++] = params[0];
+            paramname[paramnamepos++] = params[0];
           }
         }
       }
@@ -277,7 +278,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
       AVSynthVideoFilterParam *paramstr = NULL;
       GParamSpec *paramspec = NULL;
       /* FIXME: make all params construct-time-only? Because they are...right? */
-      GParamFlags paramflags = (GParamFlags) G_PARAM_READABLE |
+      GParamFlags paramflags = (GParamFlags) (G_PARAM_READABLE |
         G_PARAM_WRITABLE | G_PARAM_STATIC_NICK |
         G_PARAM_STATIC_BLURB);
 
@@ -288,11 +289,11 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
       {
         /* The property is not named - create a name */
         if (paramtype == 'c')
-          paramname = g_strdup_printf ("sink%d", properties->len);
+          paramname = g_strdup_printf ("sink%d", klass->properties->len);
         else if (parammult == 0)
-          paramname = g_strdup_printf ("param%d", properties->len);
+          paramname = g_strdup_printf ("param%d", klass->properties->len);
         else
-          paramname = g_strdup_printf ("paramelement%d", properties->len);
+          paramname = g_strdup_printf ("paramelement%d", klass->properties->len);
         paramstr->param_name = paramname;
       }
 
@@ -308,7 +309,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
           break;
         case 'f':
           paramspec = g_param_spec_float (paramname, "", "",
-              G_MINFLOAT, G_MAXFLOAG, G_MINFLOAG, paramflags);
+              G_MINFLOAT, G_MAXFLOAT, G_MINFLOAT, paramflags);
           break;
         case 'c':
           break;
@@ -325,24 +326,24 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
 
       if (paramspec && parammult == 0)
       {
-        g_object_class_install_property (gobject_class, properties->len,
+        g_object_class_install_property (gobject_class, klass->properties->len,
           paramspec);
       }
       else if (paramspec && parammult == '+')
       {
         GParamSpec *paramspec_array;
         gchar *paramname_array;
-        paramname_array = g_strdup_printf ("param%d", properties->len);
+        paramname_array = g_strdup_printf ("param%d", klass->properties->len);
         paramspec_array = g_param_spec_value_array (paramname_array,
             "", "", paramspec, paramflags);
-        g_object_class_install_property (gobject_class, properties->len,
+        g_object_class_install_property (gobject_class, klass->properties->len,
           paramspec_array);
       }
-      klass->params = g_list_append (klass->params, (gpointer) paramstr);
+      g_ptr_array_add (klass->properties, (gpointer) paramstr);
 
       parammult = 0;
       paramname = NULL;
-      paramnamelen = 0;
+      paramnamepos = 0;
       paramtype = 0;
     }
   }
@@ -381,6 +382,15 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter)
 
 //  oclass->params
   /* setup pads */
+  for (guint i = 0; i < oclass->properties->len; i++)
+  {
+    AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam*) g_ptr_array_index (oclass->properties, i);
+    if (param->param_type != 'c')
+      continue;
+    if (param->param_mult != '0')
+      GST_FIXME ("Can't create an array of sinkpads for %c%c", param->param_type, param->param_mult);
+    
+  }
   /* TODO: run through klass->params and create a pad for each 'c' param */
   /*
   avsynth_video_filter->sinkpad = gst_pad_new_from_template (oclass->sinktempl, "sink");
@@ -994,7 +1004,8 @@ gst_avsynth_video_filter_set_property (GObject * object,
     guint prop_id, const GValue * value, GParamSpec * pspec)
 {
   GstAVSynthVideoFilter *avsynth_video_filter = (GstAVSynthVideoFilter *) object;
-  GstAVSynthVideoFilterClass *filter_class = G_OBJECT_GET_CLASS (avsynth_video_filter);
+  /* FIXME: shouldn't i use some obscure GObject safe casting macro? */
+  GstAVSynthVideoFilterClass *filter_class = (GstAVSynthVideoFilterClass *) G_OBJECT_GET_CLASS (avsynth_video_filter);
 
   switch (prop_id) {
     /* TODO: implement properties */
@@ -1031,7 +1042,7 @@ gst_avsynth_video_filter_get_property (GObject * object,
     guint prop_id, GValue * value, GParamSpec * pspec)
 {
   GstAVSynthVideoFilter *avsynth_video_filter = (GstAVSynthVideoFilter *) object;
-  GstAVSynthVideoFilterClass *filter_class = G_OBJECT_GET_CLASS (avsynth_video_filter);
+  GstAVSynthVideoFilterClass *filter_class = (GstAVSynthVideoFilterClass *) G_OBJECT_GET_CLASS (avsynth_video_filter);
 
   switch (prop_id) {
     /* TODO: implement properties */

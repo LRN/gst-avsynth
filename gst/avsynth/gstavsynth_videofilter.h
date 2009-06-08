@@ -92,7 +92,7 @@ struct _GstAVSynthVideoFilterClass
 
   GstPadTemplate *srctempl, *sinktempl;
 
-  GArray /*of AVSynthVideoFilterParam*/ *properties;
+  GPtrArray /*of ptrs to AVSynthVideoFilterParam*/ *properties;
 };
 
 struct _GstAVSynthVideoFilterClassParams

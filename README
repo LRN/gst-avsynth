@@ -34,7 +34,7 @@ It's not really 0.10.0, but it would have been weird to have gstreamer-0.10.0,
 gst-plugins-base-0.10.0 AND gst-avsynth-0.0.1 ... Right?
 
 GstAVSynth is a plugin that isn't really a plugin. Basically it's a shallow
-re-implementation of the famous AviSynth frameserver, time time - based on
+re-implementation of the famous AviSynth frameserver, this time - based on
 GStreamer multimedia framework. That is, it's not tied to Windows or AVIFile
 anymore. It's shallow - because it doesn't have scripting support and lacks
 some of the features that made AviSynth so good. Still, if you want to take

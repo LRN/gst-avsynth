@@ -255,7 +255,6 @@ gst/Makefile
 gst/avsynth/Makefile
 filters/Makefile
 filters/testfilter/Makefile
-po/Makefile.in
 common/Makefile
 common/m4/Makefile
 m4/Makefile

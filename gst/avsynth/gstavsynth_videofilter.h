@@ -48,10 +48,9 @@ struct _GstAVSynthVideoFilter
 
   /* A plugin that registered the function */
   GModule *plugin;
-  /* Function implementation */
-  IScriptEnvironment::ApplyFunc apply;
-  /* Function extra param */
-  void* user_data;
+
+  /* An object that implements the function */
+  IClip *impl;
 
   ScriptEnvironment *env;
 

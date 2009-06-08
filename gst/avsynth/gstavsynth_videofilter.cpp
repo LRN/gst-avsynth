@@ -380,28 +380,29 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter)
 
   init_func (avsynth_video_filter->env);
 
-//  oclass->params
   /* setup pads */
+
+  avsynth_video_filter->sinkpads = g_ptr_array_new ();
+
   for (guint i = 0; i < oclass->properties->len; i++)
   {
+    GstPad *sinkpad = NULL;
     AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam*) g_ptr_array_index (oclass->properties, i);
     if (param->param_type != 'c')
       continue;
-    if (param->param_mult != '0')
+    if (param->param_mult != 0)
       GST_FIXME ("Can't create an array of sinkpads for %c%c", param->param_type, param->param_mult);
-    
+
+    sinkpad = gst_pad_new_from_template (oclass->sinktempl, "sink");
+    g_ptr_array_add (avsynth_video_filter->sinkpads, (gpointer) sinkpad);
+    gst_pad_set_setcaps_function (sinkpad,
+        GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_setcaps));
+    gst_pad_set_event_function (sinkpad,
+        GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_sink_event));
+    gst_pad_set_chain_function (sinkpad,
+        GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_chain));
+    gst_element_add_pad (GST_ELEMENT (avsynth_video_filter), sinkpad);
   }
-  /* TODO: run through klass->params and create a pad for each 'c' param */
-  /*
-  avsynth_video_filter->sinkpad = gst_pad_new_from_template (oclass->sinktempl, "sink");
-  gst_pad_set_setcaps_function (avsynth_video_filter->sinkpad,
-      GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_setcaps));
-  gst_pad_set_event_function (avsynth_video_filter->sinkpad,
-      GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_sink_event));
-  gst_pad_set_chain_function (avsynth_video_filter->sinkpad,
-      GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_chain));
-  gst_element_add_pad (GST_ELEMENT (avsynth_video_filter), avsynth_video_filter->sinkpad);
-  */
 
   avsynth_video_filter->srcpad = gst_pad_new_from_template (oclass->srctempl, "src");
   gst_pad_use_fixed_caps (avsynth_video_filter->srcpad);
@@ -411,8 +412,7 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter)
       GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_query));
   gst_element_add_pad (GST_ELEMENT (avsynth_video_filter), avsynth_video_filter->srcpad);
 
-  /* FIXME: use GST_FORMAT_DEFAULT segment? */
-  gst_segment_init (&avsynth_video_filter->segment, GST_FORMAT_TIME);
+  gst_segment_init (&avsynth_video_filter->segment, GST_FORMAT_DEFAULT);
 }
 
 void
@@ -430,38 +430,21 @@ gboolean
 gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
 {
   GstAVSynthVideoFilter *avsynth_video_filter;
-//  GstPad *peer;
+  GstPad *peer;
   gboolean res;
 
   avsynth_video_filter = (GstAVSynthVideoFilter *) gst_pad_get_parent (pad);
 
   res = FALSE;
 
-  /* TODO: go through all sinkpads and forward to each one? */
-  /*
-  if ((peer = gst_pad_get_peer (avsynth_video_filter->sinkpad))) {
-    // just forward to peer
+  for (guing i = 0; i < avsynth_video_filter->sinkpads->len; i++)
+  {
+    GstPad *sinkpad = (GstPad *) g_ptr_array_index (avsynth_video_filter->sinkpads, i);
+    peer = gst_pad_get_peer (sinkpad));
+    /* Forward the query to the peer */
     res = gst_pad_query (peer, query);
     gst_object_unref (peer);
   }
-  */
-#if 0
-  {
-    GstFormat bfmt;
-
-    bfmt = GST_FORMAT_BYTES;
-
-    /* ok, do bitrate calc... */
-    if ((type != GST_QUERY_POSITION && type != GST_QUERY_TOTAL) ||
-        *fmt != GST_FORMAT_TIME || avsynth_video_filter->context->bit_rate == 0 ||
-        !gst_pad_query (peer, type, &bfmt, value))
-      return FALSE;
-
-    if (avsynth_video_filter->pcache && type == GST_QUERY_POSITION)
-      *value -= GST_BUFFER_SIZE (avsynth_video_filter->pcache);
-    *value *= GST_SECOND / avsynth_video_filter->context->bit_rate;
-  }
-#endif
 
   gst_object_unref (avsynth_video_filter);
 
@@ -486,10 +469,11 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
     }
     default:
       /* forward upstream */
-      /* TODO: forward to all sink pads? */
-      /*
-      res = gst_pad_push_event (avsynth_video_filter->sinkpad, event);
-      */
+      for (guing i = 0; i < avsynth_video_filter->sinkpads->len; i++)
+      {
+        GstPad *sinkpad = (GstPad *) g_ptr_array_index (avsynth_video_filter->sinkpads, i);
+        res = gst_pad_push_event (sinkpad, event);
+      }
       break;
   }
 
@@ -515,9 +499,23 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
 
   GST_OBJECT_LOCK (avsynth_video_filter);
 
-  /* TODO: filter reinitialization (for new caps) */
+  /* TODO: filter reinitialization (for new caps)
+   * So...we've got a new media, with different caps. What to do?
+   * As far as i know, AviSynth can't feed dynamically changing media to a
+   * filter. Which means that each setcaps after the first one should
+   * either fail or recreate the filter. I'll go for recreation, i think.
+   */
   /*
-  A reminder: this is a ripoff from gst-ffmpeg
+  if (impl)
+    delete impl;
+  /* Here we need to pass
+  AVSValue *args;
+  which is an array of arguments, composed according to filter's param string
+  First argument is usually a PClip.
+  Which means it is time to think about Clip object implementation.
+  impl = avsynth_video_filter->env->apply(args, avsynth_video_filter->env->userdata, avsynth_video_filter->env);
+  */
+  /*
   // close old session
   gst_avsynth_video_filter_close (avsynth_video_filter);
 

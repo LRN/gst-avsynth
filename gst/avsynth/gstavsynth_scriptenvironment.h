@@ -66,18 +66,18 @@ public:
   bool __stdcall PlanarChromaAlignment(IScriptEnvironment::PlanarChromaAlignmentMode key);
   PVideoFrame __stdcall SubframePlanar(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV);
 
+  /* Filter implementation */
+  ApplyFunc apply;
+  void *userdata;
+
 private:
+
   /* Pointer to the parent object */
   GstAVSynthVideoFilter *parent_object;
-  GstAVSynthVideoFilterClass *parent_class;
+  GstAVSynthVideoFilterclass *parent_class;
 
   /* String storage (for SaveString and *print function implementations) */
   GStringChunk *string_dump;
-
-  /* Filter implementation */
-  ApplyFunc apply;
-
-  void *userdata;
 
   /* From AviSynth */
   bool PlanarChromaAlignmentState;

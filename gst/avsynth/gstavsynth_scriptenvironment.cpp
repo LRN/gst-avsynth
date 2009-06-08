@@ -88,7 +88,7 @@ ImplVideoFrameBuffer::ImplVideoFrameBuffer(int size): VideoFrameBuffer(size)
 }
 
 ImplVideoFrameBuffer::~ImplVideoFrameBuffer() {
-//  _ASSERTE(refcount == 0);
+  _ASSERTE(refcount == 0);
   g_atomic_int_inc (&sequence_number); // HACK : Notify any children with a pointer, this buffer has changed!!!
   if (data) delete[] data;
   data = 0; // and mark it invalid!!

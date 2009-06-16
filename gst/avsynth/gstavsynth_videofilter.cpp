@@ -35,21 +35,41 @@
 #include <gst/gst.h>
 
 #include "gstavsynth.h"
-#include "gstavsynth_videobuffer.h"
+#include "gstavsynth_videocache.h"
 #include "gstavsynth_videofilter.h"
 #include "gstavsynth_loader.h"
 
 
-#define DEFAULT_BUFFER_SIZE             10
+#define DEFAULT_CACHE_SIZE 10
 
 enum
 {
   PROP_0,
-  PROP_BUFFER_SIZE,
+  PROP_CACHE_SIZE,
   PROP_LAST
 };
 
 static GstElementClass *parent_class = NULL;
+
+GType
+gst_avsynth_video_filter_get_type (void)
+{
+  static GType avsvf_type = 0;
+
+  if (G_UNLIKELY (avsvf_type == 0)) {
+    static const GTypeInfo avsvf_info = {
+      sizeof (GstAVSynthVideoFilterClass), NULL, NULL,
+      (GClassInitFunc) gst_avsynth_video_filter_class_init, NULL, NULL,
+      sizeof (GstAVSynthVideoFilter), 0,
+      (GInstanceInitFunc) gst_avsynth_video_filter_init,
+    };
+
+    avsvf_type = g_type_register_static (GST_TYPE_ELEMENT, "GstAVSynthVideoFilter",
+        &avsvf_info, (GTypeFlags) 0);
+  }
+  return avsvf_type;
+}
+
 
 void
 gst_avsynth_video_filter_base_init (GstAVSynthVideoFilterClass * klass)
@@ -352,7 +372,28 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
 }
 
 void
-gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter)
+gst_avsynth_video_filter_framegetter (void *data)
+{
+  /* FIXME: normal implementation */
+  GstAVSynthVideoFilter *avsynth_video_filter;
+  gboolean stop = FALSE;
+  int framenumber = 0;
+
+  avsynth_video_filter = GST_AVSYNTH_VIDEO_FILTER (data);
+
+  while (!stop)
+  {
+    avsynth_video_filter->impl->GetFrame(framenumber, avsynth_video_filter->env);
+
+    g_mutex_lock (avsynth_video_filter->stop_mutex);
+    stop = avsynth_video_filter->stop;
+    g_mutex_unlock (avsynth_video_filter->stop_mutex);
+    framenumber++;
+  }  
+}
+
+void
+gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
 {
   AvisynthPluginInitFunc init_func = NULL;
   GstAVSynthVideoFilterClass *oclass;
@@ -371,10 +412,10 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter)
   GST_LOG ("Getting AvisynthPluginInit2...");
   if (!g_module_symbol (avsynth_video_filter->plugin, "AvisynthPluginInit2", (gpointer *) &init_func))
   {
-    GST_LOG ("Failed. Getting AvisynthPluginInit2@4...");
+    GST_LOG ("Failed to get AvisynthPluginInit2. Getting AvisynthPluginInit2@4...");
     if (!g_module_symbol (avsynth_video_filter->plugin, "AvisynthPluginInit2@4", (gpointer *) &init_func))
     {
-      GST_ERROR ("Failed. Something is wrong here...");
+      GST_ERROR ("Failed to get AvisynthPluginInits. Something is wrong here...");
     }
   }
 
@@ -387,6 +428,7 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter)
   for (guint i = 0; i < oclass->properties->len; i++)
   {
     GstPad *sinkpad = NULL;
+    GstAVSynthVideoCache *vcache = NULL;
     AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam*) g_ptr_array_index (oclass->properties, i);
     if (param->param_type != 'c')
       continue;
@@ -402,6 +444,8 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter)
     gst_pad_set_chain_function (sinkpad,
         GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_chain));
     gst_element_add_pad (GST_ELEMENT (avsynth_video_filter), sinkpad);
+    vcache = NULL;
+    g_object_set_data (G_OBJECT (sinkpad), "video-cache", (gpointer) vcache);
   }
 
   avsynth_video_filter->srcpad = gst_pad_new_from_template (oclass->srctempl, "src");
@@ -413,6 +457,19 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter)
   gst_element_add_pad (GST_ELEMENT (avsynth_video_filter), avsynth_video_filter->srcpad);
 
   gst_segment_init (&avsynth_video_filter->segment, GST_FORMAT_DEFAULT);
+
+  avsynth_video_filter->framegetter_mutex = g_new (GStaticRecMutex, 1);
+  g_static_rec_mutex_init (avsynth_video_filter->framegetter_mutex);
+
+  avsynth_video_filter->framegetter = gst_task_create (gst_avsynth_video_filter_framegetter, (gpointer) avsynth_video_filter);
+  gst_task_set_lock (avsynth_video_filter->framegetter, avsynth_video_filter->framegetter_mutex);
+
+  avsynth_video_filter->stop = FALSE;
+  avsynth_video_filter->stop_mutex = g_mutex_new();
+
+  avsynth_video_filter->args = new PAVSValue[oclass->properties->len];
+  for (guint i = 0; i < oclass->properties->len; i++)
+    avsynth_video_filter->args[i] = NULL;
 }
 
 void
@@ -437,10 +494,10 @@ gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
 
   res = FALSE;
 
-  for (guing i = 0; i < avsynth_video_filter->sinkpads->len; i++)
+  for (guint i = 0; i < avsynth_video_filter->sinkpads->len; i++)
   {
     GstPad *sinkpad = (GstPad *) g_ptr_array_index (avsynth_video_filter->sinkpads, i);
-    peer = gst_pad_get_peer (sinkpad));
+    peer = gst_pad_get_peer (sinkpad);
     /* Forward the query to the peer */
     res = gst_pad_query (peer, query);
     gst_object_unref (peer);
@@ -469,7 +526,7 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
     }
     default:
       /* forward upstream */
-      for (guing i = 0; i < avsynth_video_filter->sinkpads->len; i++)
+      for (guint i = 0; i < avsynth_video_filter->sinkpads->len; i++)
       {
         GstPad *sinkpad = (GstPad *) g_ptr_array_index (avsynth_video_filter->sinkpads, i);
         res = gst_pad_push_event (sinkpad, event);
@@ -491,6 +548,13 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
 //  const GValue *par;
 //  const GValue *fps;
   gboolean ret = TRUE;
+  VideoInfo *vi;
+  AVSValue *arguments;
+  gint sinkcount = 0;
+  AVSValue clipval;
+  GstAVSynthVideoCache *vcache;
+
+  vcache = (GstAVSynthVideoCache *) g_object_get_data (G_OBJECT (pad), "video-cache");
 
   avsynth_video_filter = (GstAVSynthVideoFilter *) (gst_pad_get_parent (pad));
   oclass = (GstAVSynthVideoFilterClass *) (G_OBJECT_GET_CLASS (avsynth_video_filter));
@@ -499,299 +563,66 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
 
   GST_OBJECT_LOCK (avsynth_video_filter);
 
-  /* TODO: filter reinitialization (for new caps)
-   * So...we've got a new media, with different caps. What to do?
+  /* So...we've got a new media, with different caps. What to do?
    * As far as i know, AviSynth can't feed dynamically changing media to a
    * filter. Which means that each setcaps after the first one should
    * either fail or recreate the filter. I'll go for recreation, i think.
    */
-  /*
-  if (impl)
-    delete impl;
-  /* Here we need to pass
-  AVSValue *args;
-  which is an array of arguments, composed according to filter's param string
-  First argument is usually a PClip.
-  Which means it is time to think about Clip object implementation.
-  impl = avsynth_video_filter->env->apply(args, avsynth_video_filter->env->userdata, avsynth_video_filter->env);
-  */
-  /*
-  // close old session
-  gst_avsynth_video_filter_close (avsynth_video_filter);
 
-  // set defaults
-  avcodec_get_context_defaults (avsynth_video_filter->context);
+  vi = g_new0 (VideoInfo, 1);
+  gst_avsynth_buf_pad_caps_to_vi (NULL, pad, caps, vi);
 
-  // set buffer functions
-  avsynth_video_filter->context->get_buffer = gst_avsynth_video_filter_get_buffer;
-  avsynth_video_filter->context->release_buffer = gst_avsynth_video_filter_release_buffer;
-  avsynth_video_filter->context->draw_horiz_band = NULL;
+  if (vcache)
+  {
+    delete vcache;
+    vcache = NULL;
+  }
+  vcache = new GstAVSynthVideoCache(vi, pad);
+  g_object_set_data (G_OBJECT (pad), "video-cache", (gpointer) vcache);
 
-  // assume PTS as input, we will adapt when we detect timestamp reordering in the output frames.
-  avsynth_video_filter->ts_is_dts = FALSE;
-  avsynth_video_filter->has_b_frames = FALSE;
-
-  GST_LOG_OBJECT (avsynth_video_filter, "size %dx%d", avsynth_video_filter->context->width,
-      avsynth_video_filter->context->height);
-
-  // get size and so
-  gst_ffmpeg_caps_with_codecid (oclass->in_plugin->id,
-      oclass->in_plugin->type, caps, avsynth_video_filter->context);
-
-  GST_LOG_OBJECT (avsynth_video_filter, "size after %dx%d", avsynth_video_filter->context->width,
-      avsynth_video_filter->context->height);
-
-  if (!avsynth_video_filter->context->time_base.den || !avsynth_video_filter->context->time_base.num) {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "forcing 25/1 framerate");
-    avsynth_video_filter->context->time_base.num = 1;
-    avsynth_video_filter->context->time_base.den = 25;
+  if (avsynth_video_filter->impl)
+  {
+    avsynth_video_filter->impl = NULL;
   }
 
-  // get pixel aspect ratio if it's set
-  structure = gst_caps_get_structure (caps, 0);
+  arguments = new AVSValue[oclass->properties->len];
 
-  par = gst_structure_get_value (structure, "pixel-aspect-ratio");
-  if (par) {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "sink caps have pixel-aspect-ratio of %d:%d",
-        gst_value_get_fraction_numerator (par),
-        gst_value_get_fraction_denominator (par));
-    // should be NULL
-    if (avsynth_video_filter->par)
-      g_free (avsynth_video_filter->par);
-    avsynth_video_filter->par = g_new0 (GValue, 1);
-    gst_value_init_and_copy (avsynth_video_filter->par, par);
-  }
-
-  // get the framerate from incomming caps. fps_n is set to -1 when there is no valid framerate
-  fps = gst_structure_get_value (structure, "framerate");
-  if (fps != NULL && GST_VALUE_HOLDS_FRACTION (fps)) {
-    avsynth_video_filter->format.video.fps_n = gst_value_get_fraction_numerator (fps);
-    avsynth_video_filter->format.video.fps_d = gst_value_get_fraction_denominator (fps);
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Using framerate %d/%d from incoming caps",
-        avsynth_video_filter->format.video.fps_n, avsynth_video_filter->format.video.fps_d);
-  } else {
-    avsynth_video_filter->format.video.fps_n = -1;
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Using framerate from codec");
-  }
-
-  // figure out if we can use direct rendering
-  avsynth_video_filter->current_dr = FALSE;
-  avsynth_video_filter->extra_ref = FALSE;
-  if (avsynth_video_filter->direct_rendering) {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "trying to enable direct rendering");
-    if (oclass->in_plugin->capabilities & CODEC_CAP_DR1) {
-      if (oclass->in_plugin->id == CODEC_ID_H264) {
-        GST_DEBUG_OBJECT (avsynth_video_filter, "disable direct rendering setup for H264");
-        // does not work, many stuff reads outside of the planes
-        avsynth_video_filter->current_dr = FALSE;
-        avsynth_video_filter->extra_ref = TRUE;
-      } else {
-        GST_DEBUG_OBJECT (avsynth_video_filter, "enabled direct rendering");
-        avsynth_video_filter->current_dr = TRUE;
+  /* args are initialized by _set_property() */
+  for (guint i = 0; i < oclass->properties->len; i++)
+  {
+    AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (oclass->properties, i);
+    AVSValue *arg = avsynth_video_filter->args[i];
+    /* Clip argument */
+    if (param->param_type == 'c')
+    {
+      GstCaps *padcaps;
+      GstPad *sink = GST_PAD (g_ptr_array_index (avsynth_video_filter->sinkpads, sinkcount));
+      padcaps = gst_pad_get_negotiated_caps (sink);
+      /* Pad is negotiated */
+      if (padcaps)
+      {
+        arguments[i] = AVSValue (g_ptr_array_index (avsynth_video_filter->videocaches, sinkcount));
+        gst_caps_unref (padcaps);
       }
-    } else {
-      GST_DEBUG_OBJECT (avsynth_video_filter, "direct rendering not supported");
+      sinkcount++;
+    }
+    else if (arg != NULL)
+    {
+      arguments[i] = arg;
     }
   }
-  if (avsynth_video_filter->current_dr) {
-    // do *not* draw edges when in direct rendering, for some reason it draws outside of the memory.
-    avsynth_video_filter->context->flags |= CODEC_FLAG_EMU_EDGE;
-  }
 
-  // workaround encoder bugs
-  avsynth_video_filter->context->workaround_bugs |= FF_BUG_AUTODETECT;
-  avsynth_video_filter->context->error_recognition = 1;
+  clipval = avsynth_video_filter->env->apply (arguments, avsynth_video_filter->env->userdata, avsynth_video_filter->env);
+  avsynth_video_filter->impl = clipval.AsClip();
 
-  // for slow cpus
-  avsynth_video_filter->context->lowres = avsynth_video_filter->lowres;
-  avsynth_video_filter->context->hurry_up = avsynth_video_filter->hurry_up;
+  delete arguments;
 
-  // ffmpeg can draw motion vectors on top of the image (not every decoder supports it)
-  avsynth_video_filter->context->debug_mv = avsynth_video_filter->debug_mv;
-
-  // open codec - we don't select an output pix_fmt yet, simply because we don't know! We only get it during playback...
-  if (!gst_avsynth_video_filter_open (avsynth_video_filter))
-    goto open_failed;
-
-  // clipping region
-  gst_structure_get_int (structure, "width",
-      &avsynth_video_filter->format.video.clip_width);
-  gst_structure_get_int (structure, "height",
-      &avsynth_video_filter->format.video.clip_height);
-
-  // take into account the lowres property
-  if (avsynth_video_filter->format.video.clip_width != -1)
-    avsynth_video_filter->format.video.clip_width >>= avsynth_video_filter->lowres;
-  if (avsynth_video_filter->format.video.clip_height != -1)
-    avsynth_video_filter->format.video.clip_height >>= avsynth_video_filter->lowres;
-  */
-
-done:
   GST_OBJECT_UNLOCK (avsynth_video_filter);
 
   gst_object_unref (avsynth_video_filter);
 
   return ret;
-
-  /* ERRORS */
-open_failed:
-  {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Failed to open");
-/*    if (avsynth_video_filter->par) {
-      g_free (avsynth_video_filter->par);
-      avsynth_video_filter->par = NULL;
-    }*/
-    ret = FALSE;
-    goto done;
-  }
 }
-
-
-gboolean
-gst_avsynth_video_filter_negotiate (GstAVSynthVideoFilter * avsynth_video_filter)
-{
-  GstAVSynthVideoFilterClass *oclass;
-  GstCaps *caps = NULL;
-
-  oclass = (GstAVSynthVideoFilterClass *) (G_OBJECT_GET_CLASS (avsynth_video_filter));
-
-  /* TODO: do something? I'm not sure this function is required at all */
-  /*
-  if (avsynth_video_filter->format.video.width == avsynth_video_filter->context->width &&
-      avsynth_video_filter->format.video.height == avsynth_video_filter->context->height &&
-      avsynth_video_filter->format.video.fps_n == avsynth_video_filter->format.video.old_fps_n &&
-      avsynth_video_filter->format.video.fps_d == avsynth_video_filter->format.video.old_fps_d &&
-      avsynth_video_filter->format.video.pix_fmt == avsynth_video_filter->context->pix_fmt)
-    return TRUE;
-  GST_DEBUG_OBJECT (avsynth_video_filter,
-      "Renegotiating video from %dx%d@ %d/%d fps to %dx%d@ %d/%d fps",
-      avsynth_video_filter->format.video.width, avsynth_video_filter->format.video.height,
-      avsynth_video_filter->format.video.old_fps_n, avsynth_video_filter->format.video.old_fps_n,
-      avsynth_video_filter->context->width, avsynth_video_filter->context->height,
-      avsynth_video_filter->format.video.fps_n, avsynth_video_filter->format.video.fps_d);
-  avsynth_video_filter->format.video.width = avsynth_video_filter->context->width;
-  avsynth_video_filter->format.video.height = avsynth_video_filter->context->height;
-  avsynth_video_filter->format.video.old_fps_n = avsynth_video_filter->format.video.fps_n;
-  avsynth_video_filter->format.video.old_fps_d = avsynth_video_filter->format.video.fps_d;
-  avsynth_video_filter->format.video.pix_fmt = avsynth_video_filter->context->pix_fmt;
-
-  caps = gst_ffmpeg_codectype_to_caps (oclass->in_plugin->type,
-      avsynth_video_filter->context, oclass->in_plugin->id, FALSE);
-
-  if (caps == NULL)
-    goto no_caps;
-
-  switch (oclass->in_plugin->type) {
-    case CODEC_TYPE_VIDEO:
-    {
-      gint width, height;
-
-      width = avsynth_video_filter->format.video.clip_width;
-      height = avsynth_video_filter->format.video.clip_height;
-
-      if (width != -1 && height != -1) {
-        // overwrite the output size with the dimension of the clipping region
-        gst_caps_set_simple (caps,
-            "width", G_TYPE_INT, width, "height", G_TYPE_INT, height, NULL);
-      }
-      // If a demuxer provided a framerate then use it (#313970)
-      if (avsynth_video_filter->format.video.fps_n != -1) {
-        gst_caps_set_simple (caps, "framerate",
-            GST_TYPE_FRACTION, avsynth_video_filter->format.video.fps_n,
-            avsynth_video_filter->format.video.fps_d, NULL);
-      }
-      gst_avsynth_video_filter_add_pixel_aspect_ratio (avsynth_video_filter,
-          gst_caps_get_structure (caps, 0));
-      break;
-    }
-    case CODEC_TYPE_AUDIO:
-    {
-      break;
-    }
-    default:
-      break;
-  }
-  */
-
-  if (!gst_pad_set_caps (avsynth_video_filter->srcpad, caps))
-    goto caps_failed;
-
-  gst_caps_unref (caps);
-
-  return TRUE;
-
-  /* ERRORS */
-no_caps:
-  {
-    GST_ELEMENT_ERROR (avsynth_video_filter, CORE, NEGOTIATION, (NULL),
-        ("could not find caps for filter (%s), unknown type",
-            oclass->name));
-    return FALSE;
-  }
-caps_failed:
-  {
-    GST_ELEMENT_ERROR (avsynth_video_filter, CORE, NEGOTIATION, (NULL),
-        ("Could not set caps for filter (%s), not fixed?",
-            oclass->name));
-    gst_caps_unref (caps);
-
-    return FALSE;
-  }
-}
-
-/* returns TRUE if buffer is within segment, else FALSE.
- * if Buffer is on segment border, it's timestamp and duration will be clipped */
-/* TODO: rewrite in default format? */
-/*
-gboolean
-clip_video_buffer (GstAVSynthVideoFilter * avsynth_video_filter, GstBuffer * buf, GstClockTime in_ts,
-    GstClockTime in_dur)
-{
-  gboolean res = TRUE;
-  gint64 cstart, cstop;
-  GstClockTime stop;
-
-  GST_LOG_OBJECT (dec,
-      "timestamp:%" GST_TIME_FORMAT " , duration:%" GST_TIME_FORMAT,
-      GST_TIME_ARGS (in_ts), GST_TIME_ARGS (in_dur));
-
-  // can't clip without TIME segment
-  if (G_UNLIKELY (dec->segment.format != GST_FORMAT_TIME))
-    goto beach;
-
-  // we need a start time
-  if (G_UNLIKELY (!GST_CLOCK_TIME_IS_VALID (in_ts)))
-    goto beach;
-
-  // generate valid stop, if duration unknown, we have unknown stop
-  stop =
-      GST_CLOCK_TIME_IS_VALID (in_dur) ? (in_ts + in_dur) : GST_CLOCK_TIME_NONE;
-
-  // now clip
-  res =
-      gst_segment_clip (&dec->segment, GST_FORMAT_TIME, in_ts, stop, &cstart,
-      &cstop);
-  if (G_UNLIKELY (!res))
-    goto beach;
-
-  // we're pretty sure the duration of this buffer is not till the end of this segment (which _clip will assume when the stop is -1)
-  if (stop == GST_CLOCK_TIME_NONE)
-    cstop = GST_CLOCK_TIME_NONE;
-
-  // update timestamp and possibly duration if the clipped stop time is valid
-  GST_BUFFER_TIMESTAMP (buf) = cstart;
-  if (GST_CLOCK_TIME_IS_VALID (cstop))
-    GST_BUFFER_DURATION (buf) = cstop - cstart;
-
-  GST_LOG_OBJECT (dec,
-      "clipped timestamp:%" GST_TIME_FORMAT " , duration:%" GST_TIME_FORMAT,
-      GST_TIME_ARGS (cstart), GST_TIME_ARGS (GST_BUFFER_DURATION (buf)));
-
-beach:
-  GST_LOG_OBJECT (dec, "%sdropping", (res ? "not " : ""));
-  return res;
-}
-*/
 
 gboolean
 gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
@@ -872,12 +703,6 @@ done:
   return ret;
 
   /* ERRORS */
-no_bitrate:
-  {
-    GST_WARNING_OBJECT (avsynth_video_filter, "no bitrate to convert BYTES to TIME");
-    gst_event_unref (event);
-    goto done;
-  }
 invalid_format:
   {
     GST_WARNING_OBJECT (avsynth_video_filter, "unknown format received in NEWSEGMENT");
@@ -891,76 +716,38 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
 {
   GstAVSynthVideoFilter *avsynth_video_filter;
   GstAVSynthVideoFilterClass *oclass;
-  guint8 *data, *bdata, *pdata;
-  gint size, bsize, len, have_data;
   GstFlowReturn ret = GST_FLOW_OK;
   GstClockTime in_timestamp, in_duration;
-  gboolean discont;
   gint64 in_offset;
+  GstAVSynthVideoCache *vcache;
 
   avsynth_video_filter = (GstAVSynthVideoFilter *) (GST_PAD_PARENT (pad));
 
-  /* TODO: check that we're ready */
-  /*
-  if (G_UNLIKELY (!avsynth_video_filter->opened))
-    goto not_negotiated;
-  */
-
-  discont = GST_BUFFER_IS_DISCONT (inbuf);
-
-  /* The discont flags marks a buffer that is not continuous with the previous
-   * buffer. This means we need to clear whatever data we currently have. We
-   * currently also wait for a new keyframe, which might be suboptimal in the
-   * case of a network error, better show the errors than to drop all data.. */
-  /* I don't think this is applicable for AviSynth... We won't get partial buffers */
-  if (G_UNLIKELY (discont)) {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "received DISCONT");
-    /* TODO: drain what we have queued */
-    /*
-    gst_avsynth_video_filter_drain (avsynth_video_filter);
-    gst_avsynth_video_filter_flush_pcache (avsynth_video_filter);
-    avcodec_flush_buffers (avsynth_video_filter->context);
-    avsynth_video_filter->waiting_for_key = TRUE;
-    avsynth_video_filter->discont = TRUE;
-    avsynth_video_filter->last_out = GST_CLOCK_TIME_NONE;
-    avsynth_video_filter->next_ts = GST_CLOCK_TIME_NONE;
-    */
-  }
-  /* by default we clear the input timestamp after decoding each frame so that
-   * interpolation can work. */
-  //avsynth_video_filter->clear_ts = TRUE;
-
   oclass = (GstAVSynthVideoFilterClass *) (G_OBJECT_GET_CLASS (avsynth_video_filter));
 
-  /* do early keyframe check pretty bad to rely on the keyframe flag in the
-   * source for this as it might not even be parsed (UDP/file/..).  */
-  /* We don't have any keyframes at this point */
-  /*
-  if (G_UNLIKELY (avsynth_video_filter->waiting_for_key)) {
-    if (GST_BUFFER_FLAG_IS_SET (inbuf, GST_BUFFER_FLAG_DELTA_UNIT) &&
-        oclass->in_plugin->type != CODEC_TYPE_AUDIO)
-      goto skip_keyframe;
-
-    GST_DEBUG_OBJECT (avsynth_video_filter, "got keyframe");
-    avsynth_video_filter->waiting_for_key = FALSE;
-  }
-  */
+  if (G_UNLIKELY (!avsynth_video_filter->impl))
+    goto not_negotiated;
 
   in_timestamp = GST_BUFFER_TIMESTAMP (inbuf);
   in_duration = GST_BUFFER_DURATION (inbuf);
   in_offset = GST_BUFFER_OFFSET (inbuf);
 
   GST_LOG_OBJECT (avsynth_video_filter,
-      "Received new data of size %d, offset:%" G_GINT64_FORMAT ", ts:%" GST_TIME_FORMAT ", dur:%"
+      "Received new frane of size %d, offset:%" G_GINT64_FORMAT ", ts:%" GST_TIME_FORMAT ", dur:%"
       GST_TIME_FORMAT, GST_BUFFER_OFFSET (inbuf), GST_BUFFER_SIZE (inbuf),
       GST_TIME_ARGS (in_timestamp), GST_TIME_ARGS (in_duration));
 
-  /* parse cache joining. If there is cached data, its timestamp will be what we
-   * send to the parse. */
-  /* TODO: put the buffer in the cache. Cache will invoke the filter when it is full */
+  if (G_UNLIKELY (!avsynth_video_filter->getting_frames))
+  {
+    avsynth_video_filter->getting_frames = TRUE;
+    gst_task_start (avsynth_video_filter->framegetter);
+  }
 
-  bdata = GST_BUFFER_DATA (inbuf);
-  bsize = GST_BUFFER_SIZE (inbuf);
+  vcache = (GstAVSynthVideoCache *) g_object_get_data (G_OBJECT (pad), "video-cache");
+  if (G_UNLIKELY (!vcache))
+    goto not_negotiated;
+
+  vcache->AddBuffer (pad, inbuf, avsynth_video_filter->env);
 
   gst_buffer_unref (inbuf);
 
@@ -969,9 +756,8 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
   /* ERRORS */
 not_negotiated:
   {
-    oclass = (GstAVSynthVideoFilterClass *) (G_OBJECT_GET_CLASS (avsynth_video_filter));
     GST_ELEMENT_ERROR (avsynth_video_filter, CORE, NEGOTIATION, (NULL),
-        ("ffdec_%s: input format was not set before data start",
+        ("%s: filter was not initialized before data start",
             oclass->name));
     gst_buffer_unref (inbuf);
     return GST_FLOW_NOT_NEGOTIATED;
@@ -1001,73 +787,84 @@ void
 gst_avsynth_video_filter_set_property (GObject * object,
     guint prop_id, const GValue * value, GParamSpec * pspec)
 {
+  gboolean found = FALSE;
+
   GstAVSynthVideoFilter *avsynth_video_filter = (GstAVSynthVideoFilter *) object;
-  /* FIXME: shouldn't i use some obscure GObject safe casting macro? */
+
   GstAVSynthVideoFilterClass *filter_class = (GstAVSynthVideoFilterClass *) G_OBJECT_GET_CLASS (avsynth_video_filter);
 
-  switch (prop_id) {
-    /* TODO: implement properties */
-    /*
-    case PROP_LOWRES:
-      avsynth_video_filter->lowres = avsynth_video_filter->context->lowres = g_value_get_enum (value);
-      break;
-    case PROP_SKIPFRAME:
-      avsynth_video_filter->hurry_up = avsynth_video_filter->context->hurry_up =
-          g_value_get_enum (value);
-      break;
-    case PROP_DIRECT_RENDERING:
-      avsynth_video_filter->direct_rendering = g_value_get_boolean (value);
-      break;
-    case PROP_DO_PADDING:
-      avsynth_video_filter->do_padding = g_value_get_boolean (value);
-      break;
-    case PROP_DEBUG_MV:
-      avsynth_video_filter->debug_mv = avsynth_video_filter->context->debug_mv =
-          g_value_get_boolean (value);
-      break;
-    case PROP_CROP:
-      avsynth_video_filter->crop = g_value_get_boolean (value);
-      break;
-    */
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-      break;
+  for (guint i = 0; !found && i < filter_class->properties->len; i++)
+  {
+    AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (filter_class->properties, i);
+    if (param->param_id == prop_id)
+    {
+      AVSValue *arg = avsynth_video_filter->args[i];
+      found = TRUE;
+      if (arg == NULL)
+        arg = avsynth_video_filter->args[i] = new AVSValue();
+      switch (param->param_type)
+      {
+        case 'b':
+          *arg = AVSValue (g_value_get_boolean (value));
+          break;
+        case 'i':
+          *arg = AVSValue (g_value_get_int (value));
+          break;
+        case 'f':
+          *arg = AVSValue (g_value_get_float (value));
+          break;
+        case 's':
+          *arg = AVSValue (g_value_get_string (value));
+          break;
+        default:
+          G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+          break;
+      }
+    }
   }
+  if (!found)
+    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 }
 
 void
 gst_avsynth_video_filter_get_property (GObject * object,
     guint prop_id, GValue * value, GParamSpec * pspec)
 {
+  gboolean found = FALSE;
   GstAVSynthVideoFilter *avsynth_video_filter = (GstAVSynthVideoFilter *) object;
   GstAVSynthVideoFilterClass *filter_class = (GstAVSynthVideoFilterClass *) G_OBJECT_GET_CLASS (avsynth_video_filter);
 
-  switch (prop_id) {
-    /* TODO: implement properties */
-    /*
-    case PROP_LOWRES:
-      g_value_set_enum (value, avsynth_video_filter->context->lowres);
-      break;
-    case PROP_SKIPFRAME:
-      g_value_set_enum (value, avsynth_video_filter->context->hurry_up);
-      break;
-    case PROP_DIRECT_RENDERING:
-      g_value_set_boolean (value, avsynth_video_filter->direct_rendering);
-      break;
-    case PROP_DO_PADDING:
-      g_value_set_boolean (value, avsynth_video_filter->do_padding);
-      break;
-    case PROP_DEBUG_MV:
-      g_value_set_boolean (value, avsynth_video_filter->context->debug_mv);
-      break;
-    case PROP_CROP:
-      g_value_set_boolean (value, avsynth_video_filter->crop);
-      break;
-    */
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-      break;
+  for (guint i = 0; !found && i < filter_class->properties->len; i++)
+  {
+    AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (filter_class->properties, i);
+    if (param->param_id == prop_id)
+    {
+      AVSValue *arg = avsynth_video_filter->args[i];
+      found = TRUE;
+      if (arg == NULL)
+      {
+        g_value_unset (value);;
+      }
+      switch (param->param_type)
+      {
+        case 'b':
+          g_value_set_boolean (value, arg->AsBool());
+          break;
+        case 'i':
+          g_value_set_int (value, arg->AsInt());
+          break;
+        case 'f':
+          g_value_set_float (value, arg->AsFloat());
+          break;
+        case 's':
+          g_value_set_string (value, arg->AsString());
+          break;
+        default:
+          G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+          break;
+      }
+    }
   }
+  if (!found)
+    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 }
-
-

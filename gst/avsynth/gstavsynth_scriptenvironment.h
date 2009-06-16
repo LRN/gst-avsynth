@@ -33,6 +33,47 @@
 #ifndef __GST_AVSYNTH_SCRIPTENVIRONMENT_H__
 #define __GST_AVSYNTH_SCRIPTENVIRONMENT_H__
 
+class ImplVideoFrameBuffer;
+class ImplVideoFrame;
+class ImplClip;
+
+typedef AVSValue *PAVSValue;
+
+class ImplVideoFrame: public VideoFrame
+{
+  friend class ImplVideoFrameBuffer;
+
+  VideoFrame* Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height) const;
+  VideoFrame* Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int pitchUV) const;
+ 
+  void AddRef();
+  void Release();
+
+public:
+  ImplVideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height);
+  ImplVideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV);
+  ~ImplVideoFrame();
+
+};
+
+class ImplVideoFrameBuffer: private VideoFrameBuffer
+{
+  friend class ImplVideoFrame;
+public:
+  gboolean touched;
+
+  ImplVideoFrameBuffer(int size);
+  ImplVideoFrameBuffer();
+  ~ImplVideoFrameBuffer();
+};
+
+class ImplClip: protected IClip
+{
+  __stdcall ~ImplClip();
+  void AddRef();
+  void Release();
+};
+
 class ScriptEnvironment : public IScriptEnvironment
 {
 public:
@@ -74,7 +115,7 @@ private:
 
   /* Pointer to the parent object */
   GstAVSynthVideoFilter *parent_object;
-  GstAVSynthVideoFilterclass *parent_class;
+  GstAVSynthVideoFilterClass *parent_class;
 
   /* String storage (for SaveString and *print function implementations) */
   GStringChunk *string_dump;

@@ -31,7 +31,7 @@
 
 #include "gstavsynth.h"
 #include "gstavsynth_sdk.h"
-//#include "gstavsynth_videofilter.h"
+#include "gstavsynth_videofilter.h"
 
 typedef const char* (__stdcall *AvisynthPluginInitFunc)(IScriptEnvironment* env);
 

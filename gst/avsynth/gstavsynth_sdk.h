@@ -54,6 +54,7 @@ enum { AVISYNTH_INTERFACE_VERSION = 3 };
 // Win32 API macros, notably the types BYTE, DWORD, ULONG, etc.
 //#include <windef.h>
 #include <stdint.h>
+#include <string.h>
 
 #ifndef BYTE
 typedef uint8_t BYTE;
@@ -487,7 +488,6 @@ public:
   /* At the moment this function does nothing */
   virtual void __stdcall SetCacheHints(int cachehints,int frame_range) = 0 ;
 
-  /* Overloaded by PClip */
   virtual const VideoInfo& __stdcall GetVideoInfo() = 0;
 
   virtual __stdcall ~IClip() {};
@@ -630,8 +630,11 @@ private:
     if (!init && IsClip() && clip)
       clip->Release();
     // make sure this copies the whole struct!
+    /* AviSynth stuff is WEIRD
     ((__int32*)this)[0] = ((__int32*)src)[0];
     ((__int32*)this)[1] = ((__int32*)src)[1];
+    */
+    memcpy (this, src, sizeof (AVSValue));
   }
 };
 

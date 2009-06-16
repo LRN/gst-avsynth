@@ -31,16 +31,20 @@
 
 #include <gst/gst.h>
 
-G_BEGIN_DECLS
-
 typedef struct _GstAVSynthVideoFilter GstAVSynthVideoFilter;
 typedef struct _GstAVSynthVideoFilterClass GstAVSynthVideoFilterClass;
 typedef struct _GstAVSynthVideoFilterClassParams GstAVSynthVideoFilterClassParams;
 
-#define GST_AVSYNTH_VIDEO_FILTER_PARAMS_QDATA g_quark_from_static_string("avsynth-video-filter-params")
-
 #include "gstavsynth_scriptenvironment.h"
-#include "gstavsynth_videofilter.h"
+
+G_BEGIN_DECLS
+
+#define GST_TYPE_AVSYNTH_VIDEO_FILTER			(gst_avsynth_video_filter_get_type())
+#define GST_AVSYNTH_VIDEO_FILTER(obj)			(G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_AVSYNTH_VIDEO_FILTER,GstAVSynthVideoFilter))
+#define GST_IS_AVSYNTH_VIDEO_FILTER(obj)		(G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_AVSYNTH_VIDEO_FILTER))
+#define GST_AVSYNTH_VIDEO_FILTER_CLASS(klass)		(G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_AVSYNTH_VIDEO_FILTER,GstAVSynthVideoFilterClass))
+#define GST_IS_AVSYNTH_VIDEO_FILTER_CLASS(klass)	(G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_AVSYNTH_VIDEO_FILTER))
+#define GST_AVSYNTH_VIDEO_FILTER_GET_CLASS(obj)		(G_TYPE_CHECK_CLASS_TYPE((obj),GST_TYPE_AVSYNTH_VIDEO_FILTER, GstAVSynthVideoFilterclass))
 
 struct _GstAVSynthVideoFilter
 {
@@ -50,7 +54,7 @@ struct _GstAVSynthVideoFilter
   GModule *plugin;
 
   /* An object that implements the function */
-  IClip *impl;
+  PClip impl;
 
   ScriptEnvironment *env;
 
@@ -60,16 +64,28 @@ struct _GstAVSynthVideoFilter
   /* Array of GstPad */
   GPtrArray *sinkpads;
 
-  /* Array of GstAVSynthVideoBuffer */
-  GPtrArray *videobuffers;
+  /* Array of GstAVSynthVideoCache, one element per sinkpad */
+  GPtrArray *videocaches;
+  GMutex *videocaches_mutex;
 
   /* clipping segment */
   GstSegment segment;
+
+  /* A thread that keeps calling GetFrame() method of the underlying filter */
+  GstTask *framegetter;
+  GStaticRecMutex *framegetter_mutex;
+  gboolean getting_frames;
+
+  /* Tells the framegetter thread to stop */
+  gboolean stop;
+  GMutex *stop_mutex;
+
+  AVSValue **args;  
 };
 
 struct AVSynthVideoFilterParam
 {
-  gint param_id;
+  guint param_id;
   gchar *param_name;
   gchar param_type;
   gchar param_mult;
@@ -111,7 +127,11 @@ struct _GstAVSynthVideoFilterClassParams
 
 void gst_avsynth_video_filter_base_init (GstAVSynthVideoFilterClass * klass);
 void gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass);
-void gst_avsynth_video_filter_init (GstAVSynthVideoFilter * avsynth_video_filter);
+void gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter);
+
+
+GType gst_avsynth_video_filter_get_type (void);
+
 void gst_avsynth_video_filter_finalize (GObject * object);
 
 gboolean gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query);
@@ -119,28 +139,19 @@ gboolean gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event);
 
 gboolean gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps);
 gboolean gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event);
+
 GstFlowReturn gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * buf);
 
-GstStateChangeReturn gst_avsynth_video_filter_change_state (GstElement * element,
-    GstStateChange transition);
+GstStateChangeReturn gst_avsynth_video_filter_change_state (GstElement * element, GstStateChange transition);
 
-void gst_avsynth_video_filter_set_property (GObject * object,
-    guint prop_id, const GValue * value, GParamSpec * pspec);
-void gst_avsynth_video_filter_get_property (GObject * object,
-    guint prop_id, GValue * value, GParamSpec * pspec);
+void gst_avsynth_video_filter_set_property (GObject * object, guint prop_id, const GValue * value, GParamSpec * pspec);
+void gst_avsynth_video_filter_get_property (GObject * object, guint prop_id, GValue * value, GParamSpec * pspec);
 
 gboolean gst_avsynth_video_filter_negotiate (GstAVSynthVideoFilter * avsynth_video_filter);
 
-#define GST_TYPE_AVSYNTH_VIDEO_FILTER \
-  (gst_avsynth_video_filter_get_type())
-#define GST_AVSYNTH_VIDEO_FILTER(obj) \
-  (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_AVSYNTH_VIDEO_FILTER,GstAVSynthVideoFilter))
-#define GST_AVSYNTH_VIDEO_FILTER_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_AVSYNTH_VIDEO_FILTER,GstAVSynthVideoFilterClass))
-#define GST_IS_AVSYNTH_VIDEO_FILTER(obj) \
-  (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_AVSYNTH_VIDEO_FILTER))
-#define GST_IS_AVSYNTH_VIDEO_FILTER_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_AVSYNTH_VIDEO_FILTER))
+#define GST_AVSYNTH_VIDEO_FILTER_PARAMS_QDATA g_quark_from_static_string("avsynth-video-filter-params")
+
+gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *caps, VideoInfo *vi);
 
 G_END_DECLS
 

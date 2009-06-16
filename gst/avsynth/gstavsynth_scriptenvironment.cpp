@@ -36,47 +36,10 @@
 #include <gst/gst.h>
 
 #include "gstavsynth.h"
-#include "gstavsynth_videobuffer.h"
+#include "gstavsynth_videocache.h"
 #include "gstavsynth_videofilter.h"
 #include "gstavsynth_loader.h"
 #include "gstavsynth_scriptenvironment.h"
-
-class ImplVideoFrameBuffer;
-class ImplVideoFrame;
-class ImplClip;
-
-class ImplVideoFrame: public VideoFrame
-{
-  friend class ImplVideoFrameBuffer;
-
-  VideoFrame* Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height) const;
-  VideoFrame* Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int pitchUV) const;
- 
-  void AddRef();
-  void Release();
-
-public:
-  ImplVideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height);
-  ImplVideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV);
-  ~ImplVideoFrame();
-
-};
-
-class ImplVideoFrameBuffer: private VideoFrameBuffer
-{
-  friend class ImplVideoFrame;
-public:
-  ImplVideoFrameBuffer(int size);
-  ImplVideoFrameBuffer();
-  ~ImplVideoFrameBuffer();
-};
-
-class ImplClip: protected IClip
-{
-  __stdcall ~ImplClip();
-  void AddRef();
-  void Release();
-};
 
 ImplVideoFrameBuffer::ImplVideoFrameBuffer(): VideoFrameBuffer()
 {
@@ -348,53 +311,6 @@ ScriptEnvironment::FunctionExists(const char* name)
     return false;
 }
 
-AVSValue
-ScriptEnvironment::Invoke(const char* name, const AVSValue args, const char** arg_names)
-{
-  /* FIXME: thow exception? Since we won't implement this function */
-  return NULL;
-}
-
-AVSValue
-ScriptEnvironment::GetVar(const char* name)
-{
-  /* TODO: implement simple variable table? */
-  return NULL;
-}
-
-bool
-ScriptEnvironment::SetVar(const char* name, const AVSValue& val)
-{
-  /* TODO: implement simple variable table? */
-  return false;
-}
-
-bool
-ScriptEnvironment::SetGlobalVar(const char* name, const AVSValue& val)
-{
-  /* TODO: implement simple variable table? */
-  return false;
-}
-
-void
-ScriptEnvironment::PushContext(int level)
-{
-  /* FIXME: thow exception? Since we won't implement this function */
-}
-
-void
-ScriptEnvironment::PopContext()
-{
-  /* FIXME: thow exception? Since we won't implement this function */
-}
-
-void
-ScriptEnvironment::PopContextGlobal()
-{
-  /* FIXME: thow exception? Since we won't implement this function */
-  return;
-}
-
 /* Both NewVideoFrame methods are GPL */
 
 PVideoFrame __stdcall
@@ -537,7 +453,7 @@ void BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_
     int y;
     for (y = height; y > 0; --y)
     {
-      memcpy(dstp, srcp, row_size);
+      g_memmove(dstp, srcp, row_size);
       dstp += dst_pitch;
       srcp += src_pitch;
     }
@@ -579,12 +495,14 @@ int
 ScriptEnvironment::SetMemoryMax(int mem)
 {
   /* TODO: implement */
+  return G_MAXINT;
 }
 
 int
 ScriptEnvironment::SetWorkingDir(const char * newdir)
 {
   /* TODO: implement */
+  return 0;
 }
 
 void*
@@ -618,139 +536,78 @@ ScriptEnvironment::PlanarChromaAlignment(IScriptEnvironment::PlanarChromaAlignme
 }
 
 VideoFrameBuffer* ScriptEnvironment::NewFrameBuffer(int size) {
-//  memory_used += size;
-//  _RPT1(0, "Frame buffer memory used: %I64d\n", memory_used);
   return new LinkedVideoFrameBuffer(size);
 }
 
 
 VideoFrameBuffer* ScriptEnvironment::GetFrameBuffer2(int size) {
-  LinkedVideoFrameBuffer *i, *j;
 
-  // Before we allocate a new framebuffer, check our memory usage, and if we
-  // are 12.5% or more above allowed usage discard some unreferenced frames.
-  /*
-  if (memory_used >=  memory_max + max(size, (memory_max >> 3)) ) {
-    ++g_Mem_stats.CleanUps;
-    int freed = 0;
-    int freed_count = 0;
-    // Deallocate enough unused frames.
-    for (i = video_frame_buffers.prev; i != &video_frame_buffers; i = i->prev) {
-      if (i->GetRefcount() == 0) {
-        if (i->next != i->prev) {
-          // Adjust unpromoted sublist if required
-          if (unpromotedvfbs == i) unpromotedvfbs = i->next;
-          // Store size.
-          freed += i->data_size;
-          freed_count++;
-          // Delete data;
-          i->~LinkedVideoFrameBuffer();  // Can't delete me because caches have pointers to me
-          // Link onto tail of lost_video_frame_buffers chain.
-          j = i;
-          i = i -> next; // step back one
-          Relink(lost_video_frame_buffers.prev, j, &lost_video_frame_buffers);
-          if ((memory_used+size - freed) < memory_max)
-            break; // Stop, we are below 100% utilization
-        }
-        else break;
-      }
-    }
-    _RPT2(0,"Freed %d frames, consisting of %d bytes.\n",freed_count, freed);
-    memory_used -= freed;
-	g_Mem_stats.Losses += freed_count;
-  } 
-
-  // Plan A: When we are below our memory usage :-
-  if (memory_used + size < memory_max) {
-    //   Part 1: look for a returned free buffer of the same size and reuse it
-    for (i = video_frame_buffers.prev; i != &video_frame_buffers; i = i->prev) {
-      if (i->returned && (i->GetRefcount() == 0) && (i->GetDataSize() == size)) {
-        ++g_Mem_stats.PlanA1;
-        return i;
-      }
-    }
-    //   Part 2: else just allocate a new buffer
-    ++g_Mem_stats.PlanA2;
-    return NewFrameBuffer(size);
-  }
-
-  // To avoid Plan D we prod the caches to surrender any VFB's
-  // they maybe guarding. We start gently and ask for just the
-  // most recently locked VFB from previous cycles, then we ask
-  // for the most recently locked VFB, then we ask for all the
-  // locked VFB's. Next we start on the CACHE_RANGE protected
-  // VFB's, as an offset we promote these.
-  // Plan C is not invoked until the Cache's have been poked once.
-  for (int c=Cache::PC_Nil; c <= Cache::PC_UnProtectAll; c++) {
-    CacheHead->PokeCache(c, size, this);
-
-    // Plan B: Steal the oldest existing free buffer of the same size
-    j = 0;
-    for (i = video_frame_buffers.prev; i != &video_frame_buffers; i = i->prev) {
-      if (i->GetRefcount() == 0) {
-        if (i->GetDataSize() == size) {
-          ++g_Mem_stats.PlanB;
-          InterlockedIncrement((long*)&i->sequence_number);  // Signal to the cache that the vfb has been stolen
-          return i;
-        }
-        if (i->GetDataSize() > size) {
-          // Remember the smallest VFB that is bigger than our size
-          if ((j == 0) || (i->GetDataSize() < j->GetDataSize())) j = i;
-        }
-      }
-    }
-
-    // Plan C: Steal the oldest, smallest free buffer that is greater in size
-    if (j && c > Cache::PC_Nil) {
-      ++g_Mem_stats.PlanC;
-      InterlockedIncrement((long*)&j->sequence_number);  // Signal to the cache that the vfb has been stolen
-      return j;
-    }
-  }
-  */
-  // Plan D: Allocate a new buffer, regardless of current memory usage
-  //++g_Mem_stats.PlanD;
+  /* TODO: A kind of garbage collection used to be here in AviSynth. Maybe
+   * someday i will implement something like that.
+   */
   return NewFrameBuffer(size);
 }
 
 VideoFrameBuffer* ScriptEnvironment::GetFrameBuffer(int size) {
   LinkedVideoFrameBuffer* result = (LinkedVideoFrameBuffer *) GetFrameBuffer2(size);
 
+  /* TODO: Check for allocation success. If allocation was not successful,
+   * try it again, and if it fails again, throw an error and die.
+   */
   if (!result || !result->data) {
     // Damn! we got a NULL from malloc
-    /*
-    _RPT3(0, "GetFrameBuffer failure, size=%d, memory_max=%I64d, memory_used=%I64d", size, memory_max, memory_used);
-
-    // Put that VFB on the lost souls chain
-    if (result) Relink(lost_video_frame_buffers.prev, result, &lost_video_frame_buffers);
-
-	__int64 save_max = memory_max;
-
-    // Set memory_max to 12.5% below memory_used 
-    memory_max = max(4*1024*1024, memory_used - max(size, (memory_used/9)));
-
-    // Retry the request
-    result = GetFrameBuffer2(size);
-
-	memory_max = save_max;
-
-    if (!result || !result->data) {
-      // Damn!! Damn!! we are really screwed, winge!
-      if (result) Relink(lost_video_frame_buffers.prev, result, &lost_video_frame_buffers);
-    */
-      ThrowError("GetFrameBuffer: Returned a VFB with a 0 data pointer!\n"
-                 "I think we have run out of memory folks!");
-    /*
-    }
-    */
+    ThrowError("GetFrameBuffer: Returned a VFB with a 0 data pointer!\n"
+               "I think we have run out of memory folks!");
   }
-
-  // Link onto head of unpromoted video_frame_buffers chain.
-  //Relink(unpromotedvfbs->prev, result, unpromotedvfbs);
-  // Adjust unpromoted sublist
-  //unpromotedvfbs = result;
 
   // Flag it as returned, i.e. currently not managed
   result->returned = true;
   return result;
+}
+
+AVSValue
+ScriptEnvironment::Invoke(const char* name, const AVSValue args, const char** arg_names)
+{
+  /* FIXME: thow exception? Since we won't implement this function */
+  return NULL;
+}
+
+AVSValue
+ScriptEnvironment::GetVar(const char* name)
+{
+  /* TODO: implement simple variable table? */
+  return NULL;
+}
+
+bool
+ScriptEnvironment::SetVar(const char* name, const AVSValue& val)
+{
+  /* TODO: implement simple variable table? */
+  return false;
+}
+
+bool
+ScriptEnvironment::SetGlobalVar(const char* name, const AVSValue& val)
+{
+  /* TODO: implement simple variable table? */
+  return false;
+}
+
+void
+ScriptEnvironment::PushContext(int level)
+{
+  /* FIXME: thow exception? Since we won't implement this function */
+}
+
+void
+ScriptEnvironment::PopContext()
+{
+  /* FIXME: thow exception? Since we won't implement this function */
+}
+
+void
+ScriptEnvironment::PopContextGlobal()
+{
+  /* FIXME: thow exception? Since we won't implement this function */
+  return;
 }

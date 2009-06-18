@@ -168,7 +168,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
   /* This is a kind of Turing machine...i think... 
    * Goes through each character in param string.
    */
-  for (gchar *params = (gchar *) klass->params; params; params++)
+  for (gchar *params = (gchar *) klass->params; params[0]; params++)
   {
     /* Depending on the machine state ... */
     switch (paramstate)
@@ -183,7 +183,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
             paramnamepos = 0;
             
             /* Find a closing ']' to calculate the name length */
-            for (gchar *nameptr = params++; nameptr[0] != ']'; nameptr++)
+            for (gchar *nameptr = params + 1; nameptr[0] != ']'; nameptr++)
             {
               /* we've reached the null terminator, param string is broken */            
               if (!nameptr)
@@ -227,6 +227,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
             paramname[paramnamepos++] = params[0];
           }
         }
+        break;
       }
       case 1: /* Reading a type */
       {
@@ -242,6 +243,8 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
             /* Save the type and change state to 'reading multiplier' */
             paramtype = params[0];
             paramstate = 2;
+            if (params[1] == 0)
+               newparam = TRUE;
             break;
           }
           default:
@@ -291,6 +294,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
           }
         }
       }
+      break;
     }
     /* We've finished reading a group */
     if (newparam)
@@ -733,8 +737,8 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
   in_offset = GST_BUFFER_OFFSET (inbuf);
 
   GST_LOG_OBJECT (avsynth_video_filter,
-      "Received new frane of size %d, offset:%" G_GINT64_FORMAT ", ts:%" GST_TIME_FORMAT ", dur:%"
-      GST_TIME_FORMAT, GST_BUFFER_OFFSET (inbuf), GST_BUFFER_SIZE (inbuf),
+      "Received new frame of size %d, offset:%" G_GINT64_FORMAT ", ts:%" GST_TIME_FORMAT ", dur:%"
+      GST_TIME_FORMAT, GST_BUFFER_SIZE (inbuf), GST_BUFFER_OFFSET (inbuf),
       GST_TIME_ARGS (in_timestamp), GST_TIME_ARGS (in_duration));
 
   if (G_UNLIKELY (!avsynth_video_filter->getting_frames))

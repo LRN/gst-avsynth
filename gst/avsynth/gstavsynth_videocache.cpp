@@ -29,23 +29,15 @@ gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *c
 //  guint32 fourcc = 0;
   gint width = 0, height = 0;
   gboolean interlaced;
-  GstFormat qfmt;
-  GstQuery *durqur;
+  GstFormat qfmt = GST_FORMAT_DEFAULT;
   gint64 duration = 0;
  
   if (pad)
-  {
-    qfmt = GST_FORMAT_DEFAULT;
-    durqur = gst_query_new_duration (qfmt);
-
-    ret = ret & gst_pad_query (pad, durqur);
-    if (ret)
-      gst_query_parse_duration (durqur, &qfmt, &duration);
-  }
+    ret = ret && gst_pad_query_peer_duration (pad, &qfmt, &duration);
  
-  ret = ret & gst_video_format_parse_caps (caps, &vf, &width, &height);
-  ret = ret & gst_video_format_parse_caps_interlaced (caps, &interlaced);
-  ret = ret & gst_video_parse_caps_framerate (caps, &fps_num, &fps_den);
+  ret = ret && gst_video_format_parse_caps (caps, &vf, &width, &height);
+  ret = ret && gst_video_format_parse_caps_interlaced (caps, &interlaced);
+  ret = ret && gst_video_parse_caps_framerate (caps, &fps_num, &fps_den);
 
   if (!ret)
   {

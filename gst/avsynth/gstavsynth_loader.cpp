@@ -94,7 +94,7 @@ LoaderScriptEnvironment::AddFunction(const char* name, const char* paramstr, con
   /* construct the type */
   plugin_name = g_strdup ((gchar *) name);
   g_strdelimit (plugin_name, NULL, '_');
-  type_name = g_strdup_printf ("gstavsynth_%s", plugin_name);
+  type_name = g_strdup_printf ("avsynth_%s", plugin_name);
   g_free (plugin_name);
 
   /* if it's already registered, drop it */
@@ -120,10 +120,8 @@ LoaderScriptEnvironment::AddFunction(const char* name, const char* paramstr, con
   if (!gst_element_register (plugin, type_name, rank, type))
     g_warning ("Failed to register %s", type_name);
 
-  g_type_set_qdata (type, GST_AVSYNTH_VIDEO_FILTER_PARAMS_QDATA, (gpointer) NULL);
-
   /* Don't free params contents because class uses them now */
-  g_free (params);
+
   g_free (type_name);
 }
 

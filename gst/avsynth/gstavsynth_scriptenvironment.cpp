@@ -57,7 +57,7 @@ ImplVideoFrameBuffer::~ImplVideoFrameBuffer() {
   data = 0; // and mark it invalid!!
   data_size = 0;   // and don't forget to set the size to 0 as well!
 }
-
+/*
 class LinkedVideoFrameBuffer : public VideoFrameBuffer {
 public:
   enum {ident = 0x00AA5500};
@@ -68,7 +68,7 @@ public:
   LinkedVideoFrameBuffer(int size) : VideoFrameBuffer(size), returned(true), signature(ident) { next=prev=this; }
   LinkedVideoFrameBuffer() : returned(true), signature(ident) { next=prev=this; }
 };
-
+*/
 
 ImplVideoFrame::ImplVideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height):
   VideoFrame (_vfb, _offset, _pitch, _row_size, _height)
@@ -536,7 +536,7 @@ ScriptEnvironment::PlanarChromaAlignment(IScriptEnvironment::PlanarChromaAlignme
 }
 
 VideoFrameBuffer* ScriptEnvironment::NewFrameBuffer(int size) {
-  return new LinkedVideoFrameBuffer(size);
+  return new ImplVideoFrameBuffer(size);
 }
 
 
@@ -549,7 +549,7 @@ VideoFrameBuffer* ScriptEnvironment::GetFrameBuffer2(int size) {
 }
 
 VideoFrameBuffer* ScriptEnvironment::GetFrameBuffer(int size) {
-  LinkedVideoFrameBuffer* result = (LinkedVideoFrameBuffer *) GetFrameBuffer2(size);
+  ImplVideoFrameBuffer* result = (ImplVideoFrameBuffer *) GetFrameBuffer2(size);
 
   /* TODO: Check for allocation success. If allocation was not successful,
    * try it again, and if it fails again, throw an error and die.
@@ -561,7 +561,7 @@ VideoFrameBuffer* ScriptEnvironment::GetFrameBuffer(int size) {
   }
 
   // Flag it as returned, i.e. currently not managed
-  result->returned = true;
+  //result->returned = true;
   return result;
 }
 

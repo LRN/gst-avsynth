@@ -64,13 +64,17 @@ private:
   GstPad *pad;
 
 public:
-  GstAVSynthVideoCache(VideoInfo *init_vi, GstPad *in_pad, gint start_size = 10): bufs(g_ptr_array_new ()), rng_from (0), used_size (0), size (start_size), touched_last_time(-1)
+  /* start_size defines both the size of underlying array and the number of
+   * elements of that array used for cache.
+   */
+  GstAVSynthVideoCache(VideoInfo *init_vi, GstPad *in_pad, gint start_size = 10): bufs(g_ptr_array_new ()), rng_from (0), used_size (start_size), size (0), touched_last_time(0)
   {
     g_memmove (&vi, init_vi, sizeof (VideoInfo));
     vcache_mutex = g_mutex_new();
     vcache_cond = g_cond_new();
     pad = in_pad;
     g_object_ref (pad);
+    g_ptr_array_set_size (bufs, start_size);
   };
 
   ~GstAVSynthVideoCache()

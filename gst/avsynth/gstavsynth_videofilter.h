@@ -50,6 +50,9 @@ struct _GstAVSynthVideoFilter
 {
   GstElement element;
 
+  /* Whenever the _chain() is called, that call is the first one ever made */
+  gboolean firstdata;
+
   /* A plugin that registered the function */
   GModule *plugin;
 

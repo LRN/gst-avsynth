@@ -376,10 +376,10 @@ protected:
   int refcount;
 
   VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height):
-    offset(_offset), pitch(_pitch), row_size(_row_size), height(_height), offsetU(_offset), offsetV(_offset), pitchUV(0), vfb(_vfb)
+    offset(_offset), pitch(_pitch), row_size(_row_size), height(_height), offsetU(_offset), offsetV(_offset), pitchUV(0), vfb(_vfb), refcount(0)
   {}
   VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV):
-    offset(_offset), pitch(_pitch), row_size(_row_size), height(_height), offsetU(_offsetU), offsetV(_offsetV), pitchUV(_pitchUV), vfb(_vfb)
+    offset(_offset), pitch(_pitch), row_size(_row_size), height(_height), offsetU(_offsetU), offsetV(_offsetV), pitchUV(_pitchUV), vfb(_vfb), refcount(0)
   {}
 
   /* Not yet overloaded in GstAVSynth */

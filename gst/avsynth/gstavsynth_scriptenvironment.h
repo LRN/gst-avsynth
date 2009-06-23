@@ -56,7 +56,7 @@ public:
 
 };
 
-class ImplVideoFrameBuffer: private VideoFrameBuffer
+class ImplVideoFrameBuffer: public VideoFrameBuffer
 {
   friend class ImplVideoFrame;
 public:

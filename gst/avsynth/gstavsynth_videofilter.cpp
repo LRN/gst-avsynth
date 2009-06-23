@@ -396,12 +396,18 @@ gst_avsynth_video_filter_framegetter (void *data)
   }  
 }
 
+GstPadLinkReturn gst_avsynth_video_filter_sink_link(GstPad *pad, GstPad *peer)
+{
+  return GST_PAD_LINK_OK;
+}
+
 void
 gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
 {
   AvisynthPluginInitFunc init_func = NULL;
   GstAVSynthVideoFilterClass *oclass;
   gchar *full_filename = NULL;
+  gint sinkcount = 0;
 
   oclass = (GstAVSynthVideoFilterClass *) (G_OBJECT_GET_CLASS (avsynth_video_filter));
 
@@ -428,10 +434,12 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
   /* setup pads */
 
   avsynth_video_filter->sinkpads = g_ptr_array_new ();
+  avsynth_video_filter->videocaches = g_ptr_array_new ();
 
   for (guint i = 0; i < oclass->properties->len; i++)
   {
     GstPad *sinkpad = NULL;
+    gchar *padname = NULL;
     GstAVSynthVideoCache *vcache = NULL;
     AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam*) g_ptr_array_index (oclass->properties, i);
     if (param->param_type != 'c')
@@ -439,17 +447,26 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
     if (param->param_mult != 0)
       GST_FIXME ("Can't create an array of sinkpads for %c%c", param->param_type, param->param_mult);
 
-    sinkpad = gst_pad_new_from_template (oclass->sinktempl, "sink");
+    padname = g_strdup_printf ("sink%d", sinkcount);
+    sinkpad = gst_pad_new_from_template (oclass->sinktempl, padname);
+    g_free (padname);
+
     g_ptr_array_add (avsynth_video_filter->sinkpads, (gpointer) sinkpad);
+    g_ptr_array_add (avsynth_video_filter->videocaches, (gpointer) NULL);
     gst_pad_set_setcaps_function (sinkpad,
         GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_setcaps));
     gst_pad_set_event_function (sinkpad,
         GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_sink_event));
     gst_pad_set_chain_function (sinkpad,
         GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_chain));
+/*
+    gst_pad_set_link_function (sinkpad,
+        GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_sink_link));
+*/
     gst_element_add_pad (GST_ELEMENT (avsynth_video_filter), sinkpad);
     vcache = NULL;
     g_object_set_data (G_OBJECT (sinkpad), "video-cache", (gpointer) vcache);
+    sinkcount++;
   }
 
   avsynth_video_filter->srcpad = gst_pad_new_from_template (oclass->srctempl, "src");
@@ -474,6 +491,8 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
   avsynth_video_filter->args = new PAVSValue[oclass->properties->len];
   for (guint i = 0; i < oclass->properties->len; i++)
     avsynth_video_filter->args[i] = NULL;
+
+  avsynth_video_filter->firstdata = TRUE;
 }
 
 void
@@ -553,9 +572,6 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
 //  const GValue *fps;
   gboolean ret = TRUE;
   VideoInfo *vi;
-  AVSValue *arguments;
-  gint sinkcount = 0;
-  AVSValue clipval;
   GstAVSynthVideoCache *vcache;
 
   vcache = (GstAVSynthVideoCache *) g_object_get_data (G_OBJECT (pad), "video-cache");
@@ -576,6 +592,7 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
   vi = g_new0 (VideoInfo, 1);
   gst_avsynth_buf_pad_caps_to_vi (NULL, pad, caps, vi);
 
+  /* New caps -> new VideoInfo -> new videocache */
   if (vcache)
   {
     delete vcache;
@@ -586,40 +603,33 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
 
   if (avsynth_video_filter->impl)
   {
+    /* PClip is a weird one, but i think that NULL assignment should
+     * make it call the destructor. FIXME: make sure it does.
+     */
     avsynth_video_filter->impl = NULL;
+    /* Next time we get any data, recreate the filter */
+    avsynth_video_filter->firstdata = TRUE;
   }
+
+  AVSValue *arguments;
+  gint sinkcount = 0;
+  AVSValue clipval;
 
   arguments = new AVSValue[oclass->properties->len];
 
-  /* args are initialized by _set_property() */
+  /* All this is just to assign the cache to the array... */
   for (guint i = 0; i < oclass->properties->len; i++)
   {
+    GstPad *sink;
     AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (oclass->properties, i);
-    AVSValue *arg = avsynth_video_filter->args[i];
-    /* Clip argument */
+    sink = (GstPad *) (g_ptr_array_index (avsynth_video_filter->sinkpads, sinkcount));
     if (param->param_type == 'c')
     {
-      GstCaps *padcaps;
-      GstPad *sink = GST_PAD (g_ptr_array_index (avsynth_video_filter->sinkpads, sinkcount));
-      padcaps = gst_pad_get_negotiated_caps (sink);
-      /* Pad is negotiated */
-      if (padcaps)
-      {
-        arguments[i] = AVSValue (g_ptr_array_index (avsynth_video_filter->videocaches, sinkcount));
-        gst_caps_unref (padcaps);
-      }
+      if (sink == pad)
+        g_ptr_array_index (avsynth_video_filter->videocaches, sinkcount) = vcache;
       sinkcount++;
     }
-    else if (arg != NULL)
-    {
-      arguments[i] = arg;
-    }
   }
-
-  clipval = avsynth_video_filter->env->apply (arguments, avsynth_video_filter->env->userdata, avsynth_video_filter->env);
-  avsynth_video_filter->impl = clipval.AsClip();
-
-  delete arguments;
 
   GST_OBJECT_UNLOCK (avsynth_video_filter);
 
@@ -729,9 +739,6 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
 
   oclass = (GstAVSynthVideoFilterClass *) (G_OBJECT_GET_CLASS (avsynth_video_filter));
 
-  if (G_UNLIKELY (!avsynth_video_filter->impl))
-    goto not_negotiated;
-
   in_timestamp = GST_BUFFER_TIMESTAMP (inbuf);
   in_duration = GST_BUFFER_DURATION (inbuf);
   in_offset = GST_BUFFER_OFFSET (inbuf);
@@ -741,7 +748,82 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
       GST_TIME_FORMAT, GST_BUFFER_SIZE (inbuf), GST_BUFFER_OFFSET (inbuf),
       GST_TIME_ARGS (in_timestamp), GST_TIME_ARGS (in_duration));
 
-  if (G_UNLIKELY (!avsynth_video_filter->getting_frames))
+  /* By the time _chain() is called, we should have negotiated all the pads,
+   * now we can create the filter.
+   */
+  if (G_UNLIKELY (avsynth_video_filter->firstdata))
+  {
+    AVSValue *arguments;
+    gint sinkcount = 0;
+    AVSValue clipval;
+    gboolean ready = TRUE;
+  
+    arguments = new AVSValue[oclass->properties->len];
+  
+    /* args are initialized by _set_property() */
+    for (guint i = 0; i < oclass->properties->len; i++)
+    {
+      AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (oclass->properties, i);
+      AVSValue *arg = avsynth_video_filter->args[i];
+      /* Clip argument */
+      if (param->param_type == 'c')
+      {
+        GstCaps *padcaps;
+        GstPad *sink = GST_PAD (g_ptr_array_index (avsynth_video_filter->sinkpads, sinkcount));
+        padcaps = gst_pad_get_negotiated_caps (sink);
+
+       /* FIXME: If the argument is mandatory, the filter will not check whether it is NULL or not,
+        * it will just call its AsClip().
+        * I am yet to find a filter that accepts _optional_ second clip argument, so i don't know
+        * anything about optional clip arguments. Until i figure it out, it's an error.
+        */
+        if (g_ptr_array_index (avsynth_video_filter->videocaches, sinkcount) == NULL)
+        {
+          if (!padcaps)
+          {
+            GST_DEBUG ("Sink %d is linked, but not negotiated. Waiting.", sinkcount);
+            ready = FALSE;
+          }
+          else
+            GST_ERROR ("Sink %d is negotiated, but does not have a cache attached.", sinkcount);
+        }
+
+        if (padcaps)
+        {
+          if (g_ptr_array_index (avsynth_video_filter->videocaches, sinkcount) != NULL)
+            arguments[i] = AVSValue (g_ptr_array_index (avsynth_video_filter->videocaches, sinkcount));
+/*
+          else
+            arguments[i] = NULL;
+*/
+          gst_caps_unref (padcaps);
+        }
+/*
+        else
+          arguments[i] = NULL;
+*/
+
+        sinkcount++;
+      }
+      else if (arg != NULL)
+      {
+        arguments[i] = arg;
+      }
+    }
+  
+    if (ready)
+    {
+      clipval = avsynth_video_filter->env->apply (AVSValue (arguments, oclass->properties->len), avsynth_video_filter->env->userdata, avsynth_video_filter->env);
+      avsynth_video_filter->impl = clipval.AsClip();
+    }
+
+    delete [] arguments;
+  }
+/*
+  if (G_UNLIKELY (!avsynth_video_filter->impl))
+    goto not_negotiated;
+*/
+  if (G_UNLIKELY (!avsynth_video_filter->getting_frames && avsynth_video_filter->impl))
   {
     avsynth_video_filter->getting_frames = TRUE;
     gst_task_start (avsynth_video_filter->framegetter);

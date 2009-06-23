@@ -318,8 +318,8 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
           paramname = g_strdup_printf ("param%d", klass->properties->len);
         else
           paramname = g_strdup_printf ("paramelement%d", klass->properties->len);
-        paramstr->param_name = paramname;
       }
+      paramstr->param_name = paramname;
 
       switch (paramtype)
       {
@@ -353,7 +353,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
         g_object_class_install_property (gobject_class, klass->properties->len,
           paramspec);
       }
-      else if (paramspec && parammult == '+')
+      else if (paramspec && (parammult == '+' || parammult == '*'))
       {
         GParamSpec *paramspec_array;
         gchar *paramname_array;
@@ -363,6 +363,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
         g_object_class_install_property (gobject_class, klass->properties->len,
           paramspec_array);
       }
+      paramstr->param_id = klass->properties->len;
       g_ptr_array_add (klass->properties, (gpointer) paramstr);
 
       parammult = 0;
@@ -382,6 +383,8 @@ gst_avsynth_video_filter_framegetter (void *data)
   GstAVSynthVideoFilter *avsynth_video_filter;
   gboolean stop = FALSE;
   int framenumber = 0;
+
+  разобраться с тайпкастом!
 
   avsynth_video_filter = GST_AVSYNTH_VIDEO_FILTER (data);
 
@@ -459,10 +462,10 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
         GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_sink_event));
     gst_pad_set_chain_function (sinkpad,
         GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_chain));
-/*
+
     gst_pad_set_link_function (sinkpad,
         GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_sink_link));
-*/
+
     gst_element_add_pad (GST_ELEMENT (avsynth_video_filter), sinkpad);
     vcache = NULL;
     g_object_set_data (G_OBJECT (sinkpad), "video-cache", (gpointer) vcache);
@@ -492,7 +495,7 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
   for (guint i = 0; i < oclass->properties->len; i++)
     avsynth_video_filter->args[i] = NULL;
 
-  avsynth_video_filter->firstdata = TRUE;
+  avsynth_video_filter->uninitialized = TRUE;
 }
 
 void
@@ -608,14 +611,10 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
      */
     avsynth_video_filter->impl = NULL;
     /* Next time we get any data, recreate the filter */
-    avsynth_video_filter->firstdata = TRUE;
+    avsynth_video_filter->uninitialized = TRUE;
   }
 
-  AVSValue *arguments;
   gint sinkcount = 0;
-  AVSValue clipval;
-
-  arguments = new AVSValue[oclass->properties->len];
 
   /* All this is just to assign the cache to the array... */
   for (guint i = 0; i < oclass->properties->len; i++)
@@ -632,6 +631,8 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
   }
 
   GST_OBJECT_UNLOCK (avsynth_video_filter);
+
+  GST_DEBUG_OBJECT (pad, "setcaps finished");
 
   gst_object_unref (avsynth_video_filter);
 
@@ -748,20 +749,20 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
       GST_TIME_FORMAT, GST_BUFFER_SIZE (inbuf), GST_BUFFER_OFFSET (inbuf),
       GST_TIME_ARGS (in_timestamp), GST_TIME_ARGS (in_duration));
 
-  /* By the time _chain() is called, we should have negotiated all the pads,
-   * now we can create the filter.
-   */
-  if (G_UNLIKELY (avsynth_video_filter->firstdata))
+  if (G_UNLIKELY (avsynth_video_filter->uninitialized))
   {
     AVSValue *arguments;
     gint sinkcount = 0;
     AVSValue clipval;
     gboolean ready = TRUE;
   
+    GST_DEBUG_OBJECT (pad, "Attempting to create the filter");
+
     arguments = new AVSValue[oclass->properties->len];
   
     /* args are initialized by _set_property() */
-    for (guint i = 0; i < oclass->properties->len; i++)
+    /* FIXME: simplify the readiness check */
+    for (guint i = 0; i < oclass->properties->len && ready; i++)
     {
       AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (oclass->properties, i);
       AVSValue *arg = avsynth_video_filter->args[i];
@@ -787,21 +788,13 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
           else
             GST_ERROR ("Sink %d is negotiated, but does not have a cache attached.", sinkcount);
         }
-
-        if (padcaps)
-        {
-          if (g_ptr_array_index (avsynth_video_filter->videocaches, sinkcount) != NULL)
-            arguments[i] = AVSValue (g_ptr_array_index (avsynth_video_filter->videocaches, sinkcount));
-/*
-          else
-            arguments[i] = NULL;
-*/
-          gst_caps_unref (padcaps);
-        }
-/*
         else
-          arguments[i] = NULL;
-*/
+        {
+          GstAVSynthVideoCache *cache = (GstAVSynthVideoCache *) g_ptr_array_index (avsynth_video_filter->videocaches, sinkcount);
+          arguments[i] = AVSValue ((IClip *) cache);
+        }
+        if (padcaps)
+          gst_caps_unref (padcaps);
 
         sinkcount++;
       }
@@ -813,8 +806,11 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
   
     if (ready)
     {
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Wrapper is ready, calling apply()");
       clipval = avsynth_video_filter->env->apply (AVSValue (arguments, oclass->properties->len), avsynth_video_filter->env->userdata, avsynth_video_filter->env);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "apply() returned");
       avsynth_video_filter->impl = clipval.AsClip();
+      avsynth_video_filter->uninitialized = FALSE;
     }
 
     delete [] arguments;
@@ -825,6 +821,7 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
 */
   if (G_UNLIKELY (!avsynth_video_filter->getting_frames && avsynth_video_filter->impl))
   {
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
     avsynth_video_filter->getting_frames = TRUE;
     gst_task_start (avsynth_video_filter->framegetter);
   }

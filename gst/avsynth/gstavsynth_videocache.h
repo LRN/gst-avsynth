@@ -27,7 +27,7 @@
 /* This is a cache that caches frames coming from upstream
  * to be presented to underlying filter.
  */
-class GstAVSynthVideoCache: public PClip
+class GstAVSynthVideoCache: public IClip
 {
 private:
   GPtrArray /*of ptrs to PVideoFrame*/ *bufs;
@@ -77,7 +77,7 @@ public:
     g_ptr_array_set_size (bufs, start_size);
   };
 
-  ~GstAVSynthVideoCache()
+  __stdcall ~GstAVSynthVideoCache()
   {
     for (guint i = 0; i < bufs->len; i++)
       delete (PVideoFrame *) g_ptr_array_index (bufs, i);

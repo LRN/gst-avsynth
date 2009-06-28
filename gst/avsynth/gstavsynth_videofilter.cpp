@@ -384,19 +384,31 @@ gst_avsynth_video_filter_framegetter (void *data)
   gboolean stop = FALSE;
   int framenumber = 0;
 
-  разобраться с тайпкастом!
-
-  avsynth_video_filter = GST_AVSYNTH_VIDEO_FILTER (data);
+  /* FIXME: Uh...shouldn't i use typecast macro here? */
+  avsynth_video_filter = (GstAVSynthVideoFilter *) data;
 
   while (!stop)
   {
-    avsynth_video_filter->impl->GetFrame(framenumber, avsynth_video_filter->env);
+    PVideoFrame vf = NULL;
+
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Calling GetFrame()");
+
+    vf = avsynth_video_filter->impl->GetFrame(framenumber, avsynth_video_filter->env);
+
+    GST_DEBUG_OBJECT (avsynth_video_filter, "GetFrame() returned");
+
+    for (guint i = 0; i < avsynth_video_filter->videocaches->len; i++)
+    {
+      GstAVSynthVideoCache *vcache = (GstAVSynthVideoCache *) g_ptr_array_index (avsynth_video_filter->videocaches, i);
+      vcache->ClearUntouched();
+    }
 
     g_mutex_lock (avsynth_video_filter->stop_mutex);
     stop = avsynth_video_filter->stop;
     g_mutex_unlock (avsynth_video_filter->stop_mutex);
     framenumber++;
-  }  
+  }
+  GST_DEBUG_OBJECT (avsynth_video_filter, "Stopped");
 }
 
 GstPadLinkReturn gst_avsynth_video_filter_sink_link(GstPad *pad, GstPad *peer)
@@ -744,8 +756,8 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
   in_duration = GST_BUFFER_DURATION (inbuf);
   in_offset = GST_BUFFER_OFFSET (inbuf);
 
-  GST_LOG_OBJECT (avsynth_video_filter,
-      "Received new frame of size %d, offset:%" G_GINT64_FORMAT ", ts:%" GST_TIME_FORMAT ", dur:%"
+  GST_LOG_OBJECT (pad,
+      "Received new frame of size %d, offset:%" G_GUINT64_FORMAT ", ts:%" GST_TIME_FORMAT ", dur:%"
       GST_TIME_FORMAT, GST_BUFFER_SIZE (inbuf), GST_BUFFER_OFFSET (inbuf),
       GST_TIME_ARGS (in_timestamp), GST_TIME_ARGS (in_duration));
 

@@ -59,6 +59,7 @@ private:
 
   GMutex *vcache_mutex;
   GCond *vcache_cond;
+  GCond *vcache_block_cond;
 
   /* A pad to which this cache is attached */
   GstPad *pad;
@@ -72,6 +73,7 @@ public:
     g_memmove (&vi, init_vi, sizeof (VideoInfo));
     vcache_mutex = g_mutex_new();
     vcache_cond = g_cond_new();
+    vcache_block_cond = g_cond_new();
     pad = in_pad;
     g_object_ref (pad);
     g_ptr_array_set_size (bufs, start_size);
@@ -86,6 +88,7 @@ public:
     g_mutex_unlock (vcache_mutex);
     g_mutex_free (vcache_mutex);
     g_cond_free (vcache_cond);
+    g_cond_free (vcache_block_cond);
   }
 
   gboolean AddBuffer (GstPad *pad, GstBuffer *in, ScriptEnvironment *env);

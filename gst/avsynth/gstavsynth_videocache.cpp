@@ -95,7 +95,7 @@ block_callback (GstPad *pad, gboolean blocked, gpointer user_data)
 gboolean
 GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironment *env)
 {
-  PVideoFrame *buf_ptr, buf;
+  PVideoFrame *buf_ptr;
   ImplVideoFrameBuffer *ivf;
 
   guint8 *in_data;
@@ -182,7 +182,7 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
   env->BitBlt((*buf_ptr)->GetWritePtr(PLANAR_V), (*buf_ptr)->GetPitch(PLANAR_V), in_data + offset2, in_stride2, rowsize2, height2);
   env->BitBlt((*buf_ptr)->GetWritePtr(PLANAR_U), (*buf_ptr)->GetPitch(PLANAR_U), in_data + offset1, in_stride1, rowsize1, height1);
 
-  ivf = (ImplVideoFrameBuffer *) ((gpointer) buf_ptr);
+  ivf = (ImplVideoFrameBuffer *) ((*buf_ptr)->GetFrameBuffer());
   ivf->touched = FALSE;
 
   /* It is guaranteed that at this moment we have at least one free unused

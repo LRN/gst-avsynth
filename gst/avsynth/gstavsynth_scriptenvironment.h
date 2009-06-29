@@ -54,6 +54,14 @@ public:
   ImplVideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV);
   ~ImplVideoFrame();
 
+  int GetDataSize()
+  {
+    if (vfb)
+      return vfb->GetDataSize();
+    else
+      return 0;
+  };
+
 };
 
 class ImplVideoFrameBuffer: public VideoFrameBuffer

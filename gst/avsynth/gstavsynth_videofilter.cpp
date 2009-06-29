@@ -376,13 +376,92 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
   gstelement_class->change_state = gst_avsynth_video_filter_change_state;
 }
 
+
+GstBuffer *
+gst_avsynth_ivf_to_buf (PVideoFrame &pvf, VideoInfo vi)
+{
+  ImplVideoFrameBuffer *ivf;
+  GstBuffer *ret = NULL;
+  GstVideoFormat vf;
+  GstCaps *caps = NULL;
+  //VideoInfo vi = NULL;
+  gint64 data_size;
+
+  ivf = (ImplVideoFrameBuffer *) pvf->GetFrameBuffer();
+
+  data_size = ivf->GetDataSize();
+
+  if (!data_size)
+  {
+    GST_ERROR ("Filter gave us a zero-sized buffer or a buffer with empty pointer");
+    return NULL;
+  }
+
+  // Check requested pixel_type:
+  switch (vi.pixel_type) {
+    case VideoInfo::CS_BGR24:
+      vf = GST_VIDEO_FORMAT_YV12;
+      break;
+    case VideoInfo::CS_BGR32:
+      vf = GST_VIDEO_FORMAT_BGR;
+      break;
+    case VideoInfo::CS_YUY2:
+      vf = GST_VIDEO_FORMAT_YUY2;
+      break;
+    case VideoInfo::CS_YV12:
+      vf = GST_VIDEO_FORMAT_YV12;
+      break;
+    case VideoInfo::CS_I420:
+      vf = GST_VIDEO_FORMAT_I420;
+      break;
+    default:
+      GST_ERROR ("Filter gave us a buffer with unknown colorspace");
+      return NULL;
+  }
+
+  if (vi.IsFieldBased())
+  {
+    caps = gst_video_format_new_caps_interlaced (vf, vi.width, vi.height, vi.fps_numerator, vi.fps_denominator,  1, 1, TRUE);
+    if (vi.IsParityKnown())
+    {
+      if (vi.IsTFF())
+        GST_BUFFER_FLAG_SET (ret, GST_VIDEO_BUFFER_TFF);
+      else
+        GST_BUFFER_FLAG_UNSET (ret, GST_VIDEO_BUFFER_TFF);
+    }
+  }
+  else
+    caps = gst_video_format_new_caps_interlaced (vf, vi.width, vi.height, vi.fps_numerator, vi.fps_denominator,  1, 1, FALSE);
+
+  /* I'm assuming that downstream elements are smart enough to process aligned
+   * buffer properly, so i am going to keep filter-specific alignment
+   */
+
+  ret = gst_buffer_try_new_and_alloc (data_size);
+
+  if (!ret)
+  {
+    GST_ERROR ("Cannot allocate buffer of size %" G_GINT64_FORMAT, data_size);
+    gst_caps_unref (caps);
+    return NULL;
+  }
+
+  gst_buffer_set_caps (ret, caps);
+  gst_caps_unref (caps);
+
+  g_memmove (GST_BUFFER_DATA (ret), ivf->GetReadPtr(), data_size);
+
+  return ret;
+}
+
+
 void
 gst_avsynth_video_filter_framegetter (void *data)
 {
   /* FIXME: normal implementation */
   GstAVSynthVideoFilter *avsynth_video_filter;
   gboolean stop = FALSE;
-  int framenumber = 0;
+  gint64 framenumber = 0;
 
   /* FIXME: Uh...shouldn't i use typecast macro here? */
   avsynth_video_filter = (GstAVSynthVideoFilter *) data;
@@ -390,6 +469,7 @@ gst_avsynth_video_filter_framegetter (void *data)
   while (!stop)
   {
     PVideoFrame vf = NULL;
+    GstBuffer *outbuf;
 
     GST_DEBUG_OBJECT (avsynth_video_filter, "Calling GetFrame()");
 
@@ -397,11 +477,17 @@ gst_avsynth_video_filter_framegetter (void *data)
 
     GST_DEBUG_OBJECT (avsynth_video_filter, "GetFrame() returned");
 
+    outbuf = gst_avsynth_ivf_to_buf (vf, avsynth_video_filter->impl->GetVideoInfo());
+
+    GST_BUFFER_OFFSET (outbuf) = framenumber;
+    
     for (guint i = 0; i < avsynth_video_filter->videocaches->len; i++)
     {
       GstAVSynthVideoCache *vcache = (GstAVSynthVideoCache *) g_ptr_array_index (avsynth_video_filter->videocaches, i);
       vcache->ClearUntouched();
     }
+
+    gst_pad_push (avsynth_video_filter->srcpad, outbuf);
 
     g_mutex_lock (avsynth_video_filter->stop_mutex);
     stop = avsynth_video_filter->stop;
@@ -525,7 +611,6 @@ gboolean
 gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
 {
   GstAVSynthVideoFilter *avsynth_video_filter;
-  GstPad *peer;
   gboolean res;
 
   avsynth_video_filter = (GstAVSynthVideoFilter *) gst_pad_get_parent (pad);
@@ -535,10 +620,8 @@ gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
   for (guint i = 0; i < avsynth_video_filter->sinkpads->len; i++)
   {
     GstPad *sinkpad = (GstPad *) g_ptr_array_index (avsynth_video_filter->sinkpads, i);
-    peer = gst_pad_get_peer (sinkpad);
     /* Forward the query to the peer */
-    res = gst_pad_query (peer, query);
-    gst_object_unref (peer);
+    res = gst_pad_peer_query (sinkpad, query);
   }
 
   gst_object_unref (avsynth_video_filter);
@@ -812,7 +895,7 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
       }
       else if (arg != NULL)
       {
-        arguments[i] = arg;
+        arguments[i] = *arg;
       }
     }
   

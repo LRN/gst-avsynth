@@ -93,12 +93,16 @@ void
 ImplVideoFrame::Release()
 {
   if (refcount==1) g_atomic_int_dec_and_test (&dynamic_cast<ImplVideoFrameBuffer*>(vfb)->refcount);
+  if (dynamic_cast<ImplVideoFrameBuffer*>(vfb)->refcount == 0)
+    delete vfb;
   g_atomic_int_dec_and_test (&refcount);
 }
 
 ImplVideoFrame::~ImplVideoFrame ()
 {
   g_atomic_int_dec_and_test (&dynamic_cast<ImplVideoFrameBuffer*>(vfb)->refcount);
+  if (dynamic_cast<ImplVideoFrameBuffer*>(vfb)->refcount == 0)
+    delete vfb;
 }
 
 

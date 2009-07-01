@@ -87,6 +87,6 @@ private:
 
 };
 
-gboolean gst_avsynth_video_filter_register (GstPlugin * plugin);
+gboolean gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs);
 
 #endif //__GST_AVSYNTH_LOADER_H__

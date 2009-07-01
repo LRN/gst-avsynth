@@ -32,10 +32,14 @@ dnl sets host_* variables
 AC_CANONICAL_HOST
 
 dnl our libraries and install dirs use major.minor as a version
-GST_MAJORMINOR=$GST_AVSYNTH_VERSION_MAJOR.$GST_AVSYNTH_VERSION_MINOR
+GST_MAJORMINOR=$PACKAGE_VERSION_MAJOR.$PACKAGE_VERSION_MINOR
 dnl we override it here if we need to for the release candidate of new series
 GST_MAJORMINOR=0.10
 AC_SUBST(GST_MAJORMINOR)
+
+GST_AVSYNTHMAJORMINOR=$GST_AVSYNTH_VERSION_MAJOR.$GST_AVSYNTH_VERSION_MINOR
+GST_AVSYNTHMAJORMINOR=0.10
+AC_SUBST(GST_AVSYNTHMAJORMINOR)
 
 AC_LIBTOOL_WIN32_DLL
 AM_PROG_LIBTOOL
@@ -179,6 +183,18 @@ AC_DEFINE_UNQUOTED(LIBDIR, "$LIBDIR", [library dir])
 
 dnl set location of plugin directory
 AG_GST_SET_PLUGINDIR
+
+dnl ----- from common
+dnl define location of plugin directory
+AS_AC_EXPAND(AVSYNTHPLUGINDIR, ${libdir}/avsynth-$GST_AVSYNTHMAJORMINOR)
+AC_DEFINE_UNQUOTED(AVSYNTHPLUGINDIR, "$AVSYNTHPLUGINDIR",
+  [directory where avsynth plugins are located])
+AC_MSG_NOTICE([Using $AVSYNTHPLUGINDIR as the avsynth plugin install location])
+
+dnl plugin directory configure-time variable for use in Makefile.am
+avsynthplugindir="\$(libdir)/avsynth-$GST_AVSYNTHMAJORMINOR"
+AC_SUBST(avsynthplugindir)
+dnl ----- from common
 
 dnl define an ERROR_CFLAGS Makefile variable
 AG_GST_SET_ERROR_CFLAGS($GST_CVS)

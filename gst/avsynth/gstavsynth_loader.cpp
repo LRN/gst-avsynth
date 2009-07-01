@@ -26,13 +26,19 @@
  * http://www.gnu.org/copyleft/gpl.html .
  */
 
+#ifdef HAVE_CONFIG_H
+# ifndef GST_LICENSE   /* don't include config.h twice, it has no guards */
+#  include "config.h"
+# endif
+#endif
+
 #include "gstavsynth_sdk.h"
 #include "gstavsynth_videofilter.h"
 #include "gstavsynth_loader.h"
 
 const gchar *gst_avsynth_get_plugin_directory()
 {
-  return "d:\\progs\\gstreamer\\0.10\\lib\\gstreamer-0.10";
+  return AVSYNTHPLUGINDIR;
 }
 
 /*
@@ -131,135 +137,138 @@ LoaderScriptEnvironment::~LoaderScriptEnvironment()
 }
 
 gboolean
-gst_avsynth_video_filter_register (GstPlugin * plugin)
+gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
 {
-  gchar *plugin_dir_name = NULL;
-  gchar *plugin_dir_name_utf8 = NULL;
   GDir *plugin_dir = NULL;
   GError *error = NULL;
-  const gchar *filename = NULL;
+  gchar **a_plugindirs = NULL;
+  gchar **i_plugindirs = NULL;
 
   LoaderScriptEnvironment *env = new LoaderScriptEnvironment();
 
   if (!g_module_supported())
   {
     GST_LOG ("No module support, can't load plugins");
-    return NULL;
+    goto cleanup;
   }
   else
     GST_LOG ("Module support is present");
 
-  if (!(plugin_dir_name_utf8 = g_strdup (gst_avsynth_get_plugin_directory ())))
-  {
-    GST_LOG ("Failed to get plugin directory name");
-    goto cleanup;
-  }
-  else
-    GST_LOG ("Directory name is %s", plugin_dir_name_utf8);
+  if (plugindirs)
+    a_plugindirs = g_strsplit_set (plugindirs, ";", -1);
 
-  if (!(plugin_dir_name = g_filename_from_utf8 (plugin_dir_name_utf8, -1, NULL, NULL, NULL)))
-  {
-    GST_LOG ("Failed to convert plugin directory name %s to filesystem encoding", plugin_dir_name_utf8);
-    goto cleanup;
-  }
-  else
-    GST_LOG ("Converted to filesystem encoding successfully");
+  for (i_plugindirs = a_plugindirs; i_plugindirs != NULL && *i_plugindirs != NULL; ++i_plugindirs) {
+    gchar *plugin_dir_name = NULL;
+    const gchar *filename = NULL;
+    const gchar *plugin_dir_name_utf8 = *i_plugindirs;
 
-  plugin_dir = g_dir_open (plugin_dir_name, 0, &error);
-  if (error)
-  {
-    GST_LOG ("Failed to open plugin directory %s", plugin_dir_name);
-    goto cleanup;
-  }
-  else
-    GST_LOG ("Opened the directory successfully");
-
-  GST_LOG ("Registering decoders");
-
-  while ((filename = g_dir_read_name (plugin_dir)) != NULL)
-  {
-    gchar *filename_utf8 = NULL;
-    gchar *full_filename_utf8 = NULL;
-    gchar *full_filename = NULL;
-
-    filename_utf8 = g_filename_to_utf8 (filename, -1, NULL, NULL, NULL);
-    if (!filename_utf8)
+    if (!(plugin_dir_name = g_filename_from_utf8 (plugin_dir_name_utf8, -1, NULL, NULL, NULL)))
     {
-      GST_LOG ("Failed to convert filename %s to UTF8", filename);
+      GST_LOG ("Failed to convert plugin directory name %s to filesystem encoding", plugin_dir_name_utf8);
       continue;
     }
+    else
+      GST_LOG ("Converted to filesystem encoding successfully");
 
-    full_filename_utf8 = g_strdup_printf ("%s%s%s", plugin_dir_name_utf8, G_DIR_SEPARATOR_S, filename_utf8);
-
-    if ((full_filename = g_filename_from_utf8 (full_filename_utf8, -1, NULL, NULL, NULL)))
+    plugin_dir = g_dir_open (plugin_dir_name, 0, &error);
+    if (error)
     {
-      /* FIXME: use more sophisticated check (suppress "not-a-dll" error messages?) */
-      /* What about portability? */
-      if (g_str_has_suffix (full_filename, ".dll"))
-      {
-        GModule *plugin_module = NULL;
-  
-        plugin_module = g_module_open (full_filename, (GModuleFlags) G_MODULE_BIND_LAZY);
-        if (plugin_module)
-        {
-          AvisynthPluginInitFunc init_func;
-          const char *ret = NULL;
-  
-          GST_LOG ("Opened %s", full_filename_utf8);
-           
-          if(
-                g_module_symbol (plugin_module, "AvisynthPluginInit2", (gpointer *) &init_func) ||
-                g_module_symbol (plugin_module, "AvisynthPluginInit2@4", (gpointer *) &init_func)
-            )
-          {
-            /* Assuming that g_path_get_basename() takes utf-8 string */
-            gchar *prefix = g_path_get_basename (full_filename_utf8);
-            /* TODO: remove the file extension (if any) */
-            env->SetFilename (full_filename_utf8);
-            env->SetPrefix (prefix);
-            env->SetPlugin (plugin);
-  
-            GST_LOG ("Entering Init function");
-            ret = init_func (env);
-            GST_LOG ("Exited Init function");
-            g_free (prefix);
-          }
-          else
-            GST_LOG ("Can't find AvisynthPluginInit2 or AvisynthPluginInit2@4");
-          g_module_close (plugin_module);
-        }
-        else
-          GST_LOG ("g_module_open failed for %s", filename_utf8);
-        g_free (full_filename);
-        full_filename = NULL;
-      }
-      else
-        GST_LOG ("%s is not a dll", full_filename_utf8);
+      g_error_free (error);
+      error = NULL;
+      GST_LOG ("Failed to open plugin directory %s", plugin_dir_name);
+      g_free (plugin_dir_name);
+      continue;
     }
     else
-      GST_LOG ("Failed to convert filename %s to native encoding", full_filename_utf8);
+      GST_LOG ("Opened the directory successfully");
 
-    g_free (full_filename_utf8);
-    full_filename_utf8 = NULL;
-    g_free (filename_utf8);
-    filename_utf8 = NULL;
+    GST_LOG ("Registering decoders");
+
+    while ((filename = g_dir_read_name (plugin_dir)) != NULL)
+    {
+      gchar *filename_utf8 = NULL;
+      gchar *full_filename_utf8 = NULL;
+      gchar *full_filename = NULL;
+  
+      filename_utf8 = g_filename_to_utf8 (filename, -1, NULL, NULL, NULL);
+      if (!filename_utf8)
+      {
+        GST_LOG ("Failed to convert filename %s to UTF8", filename);
+        continue;
+      }
+  
+      full_filename_utf8 = g_strdup_printf ("%s%s%s", plugin_dir_name_utf8, G_DIR_SEPARATOR_S, filename_utf8);
+  
+      if ((full_filename = g_filename_from_utf8 (full_filename_utf8, -1, NULL, NULL, NULL)))
+      {
+        /* FIXME: use more sophisticated check (suppress "not-a-dll" error messages?) */
+        /* What about portability? */
+        if (g_str_has_suffix (full_filename, ".dll"))
+        {
+          GModule *plugin_module = NULL;
+    
+          plugin_module = g_module_open (full_filename, (GModuleFlags) G_MODULE_BIND_LAZY);
+          if (plugin_module)
+          {
+            AvisynthPluginInitFunc init_func;
+            const char *ret = NULL;
+    
+            GST_LOG ("Opened %s", full_filename_utf8);
+             
+            if(
+                  g_module_symbol (plugin_module, "AvisynthPluginInit2", (gpointer *) &init_func) ||
+                  g_module_symbol (plugin_module, "AvisynthPluginInit2@4", (gpointer *) &init_func)
+              )
+            {
+              /* Assuming that g_path_get_basename() takes utf-8 string */
+              gchar *prefix = g_path_get_basename (full_filename_utf8);
+              /* TODO: remove the file extension (if any) */
+              env->SetFilename (full_filename_utf8);
+              env->SetPrefix (prefix);
+              env->SetPlugin (plugin);
+    
+              GST_LOG ("Entering Init function");
+              ret = init_func (env);
+              GST_LOG ("Exited Init function");
+              g_free (prefix);
+            }
+            else
+              GST_LOG ("Can't find AvisynthPluginInit2 or AvisynthPluginInit2@4");
+            g_module_close (plugin_module);
+          }
+          else
+            GST_LOG ("g_module_open failed for %s", filename_utf8);
+          g_free (full_filename);
+          full_filename = NULL;
+        }
+        else
+          GST_LOG ("%s is not a dll", full_filename_utf8);
+      }
+      else
+        GST_LOG ("Failed to convert filename %s to native encoding", full_filename_utf8);
+  
+      g_free (full_filename_utf8);
+      full_filename_utf8 = NULL;
+      g_free (filename_utf8);
+      filename_utf8 = NULL;
+    }
+
+    if (plugin_dir)
+      g_dir_close (plugin_dir);
+
+    g_free (plugin_dir_name);
+
+    GST_LOG ("Finished Registering decoders");
   }
+
+  if (a_plugindirs)
+    g_strfreev (a_plugindirs);
 
 cleanup:
 
   GST_LOG ("Cleaning up");
 
   delete env;
-
-  if (plugin_dir)
-    g_dir_close (plugin_dir);
-
-  if (plugin_dir_name)
-    g_free (plugin_dir_name);
-  if (plugin_dir_name_utf8)
-    g_free (plugin_dir_name_utf8);
-
-  GST_LOG ("Finished Registering decoders");
 
   return TRUE;
 }

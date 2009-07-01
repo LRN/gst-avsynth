@@ -37,7 +37,7 @@ GST_DEBUG_CATEGORY_EXTERN (gst_avsynth_debug);
 
 G_BEGIN_DECLS
 
-extern gboolean gst_avsynth_video_filter_register (GstPlugin * plugin);
+extern gboolean gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs);
 
 G_END_DECLS
 

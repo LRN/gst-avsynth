@@ -1,6 +1,6 @@
-# plugindir is set in configure
+# avsynthplugindir is set in configure
 
-plugin_LTLIBRARIES = libgstavsynth-test.la
+avsynthplugin_LTLIBRARIES = libgstavsynth-test.la
 
 # sources used to compile this plug-in
 libgstavsynth_test_la_SOURCES = gstavsynth-test.cpp

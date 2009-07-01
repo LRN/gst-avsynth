@@ -49,6 +49,20 @@
 
 GST_DEBUG_CATEGORY (gst_avsynth_debug);
 
+#ifdef G_OS_WIN32
+#include <windows.h>
+static HMODULE gst_dll_handle;
+
+BOOL WINAPI
+DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+{
+  if (fdwReason == DLL_PROCESS_ATTACH)
+    gst_dll_handle = (HMODULE) hinstDLL;
+  return TRUE;
+}
+
+#endif
+
 /* entry point to initialize the plug-in
  * initialize the plug-in itself
  * register the element factories and other features
@@ -56,13 +70,44 @@ GST_DEBUG_CATEGORY (gst_avsynth_debug);
 static gboolean
 avsynth_init (GstPlugin * avsynth)
 {
+  gchar *plugindirs = NULL;
   gboolean result = TRUE;
   GST_DEBUG_CATEGORY_INIT (gst_avsynth_debug, "avsynth",
       0, "AviSynth filter wrapper");
 
+  plugindirs = g_strdup_printf ("%s", AVSYNTHPLUGINDIR);
+#ifdef G_OS_WIN32
+  {
+    gchar *dir;
+    gchar *lib_dir;
+    gchar *plug_dir;
+    gchar *oldplugindirs = plugindirs;
+
+/*  FIXME: get gst_dll_handle from libgstreamer */
+    plug_dir = g_win32_get_package_installation_directory_of_module (
+       gst_dll_handle);
+
+    lib_dir = g_path_get_dirname (plug_dir);
+
+    dir = g_build_filename (lib_dir, "avsynth-0.10", NULL);
+
+    plugindirs = g_strdup_printf ("%s;%s", oldplugindirs, dir);
+
+    g_free (oldplugindirs);
+    g_free (plug_dir);
+    g_free (lib_dir);
+    g_free (dir);
+  }
+#endif
+  
+  gst_plugin_add_dependency_simple (avsynth, NULL, plugindirs, NULL,
+      GST_PLUGIN_DEPENDENCY_FLAG_NONE);
+
   GST_LOG("calling gst_avsynth_video_filter_register...");
-  result = result && gst_avsynth_video_filter_register(avsynth);
+  result = result && gst_avsynth_video_filter_register (avsynth, plugindirs);
   GST_LOG("gst_avsynth_video_filter_register result is %d", result);
+
+  g_free (plugindirs);
 
   return TRUE;
 }

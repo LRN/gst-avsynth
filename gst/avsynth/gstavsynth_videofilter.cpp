@@ -386,6 +386,9 @@ gst_avsynth_ivf_to_buf (PVideoFrame &pvf, VideoInfo vi)
   GstCaps *caps = NULL;
   //VideoInfo vi = NULL;
   gint64 data_size;
+  gint offset;
+
+  offset = pvf->GetOffset();
 
   ivf = (ImplVideoFrameBuffer *) pvf->GetFrameBuffer();
 
@@ -449,7 +452,7 @@ gst_avsynth_ivf_to_buf (PVideoFrame &pvf, VideoInfo vi)
   gst_buffer_set_caps (ret, caps);
   gst_caps_unref (caps);
 
-  g_memmove (GST_BUFFER_DATA (ret), ivf->GetReadPtr(), data_size);
+  g_memmove (GST_BUFFER_DATA (ret), ivf->GetReadPtr() + offset, data_size - offset);
 
   return ret;
 }

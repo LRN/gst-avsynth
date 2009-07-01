@@ -634,13 +634,16 @@ gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
 
   res = FALSE;
 
+  /* FIXME: query implementation */
+  /* res = gst_pad_query_default (pad, query); */
+  /*
   for (guint i = 0; i < avsynth_video_filter->sinkpads->len; i++)
   {
     GstPad *sinkpad = (GstPad *) g_ptr_array_index (avsynth_video_filter->sinkpads, i);
-    /* Forward the query to the peer */
+    // Forward the query to the peer
     res = gst_pad_peer_query (sinkpad, query);
   }
-
+  */
   gst_object_unref (avsynth_video_filter);
 
   GST_DEBUG_OBJECT (pad, "Finished processing a query");
@@ -648,11 +651,98 @@ gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
   return res;
 }
 
+/* From GstAdder */
+
+typedef struct
+{
+  GstEvent *event;
+  gboolean flush;
+} EventData;
+
+static gboolean
+forward_event_func (GstPad * pad, GValue * ret, EventData * data)
+{
+  GstEvent *event = data->event;
+
+  gst_event_ref (event);
+  GST_LOG_OBJECT (pad, "About to send event %s", GST_EVENT_TYPE_NAME (event));
+  if (!gst_pad_push_event (pad, event)) {
+    g_value_set_boolean (ret, FALSE);
+    GST_WARNING_OBJECT (pad, "Sending event  %p (%s) failed.",
+        event, GST_EVENT_TYPE_NAME (event));
+    /* quick hack to unflush the pads, ideally we need a way to just unflush
+     * this single collect pad */
+    if (data->flush)
+      gst_pad_send_event (pad, gst_event_new_flush_stop ());
+  } else {
+    GST_LOG_OBJECT (pad, "Sent event  %p (%s).",
+        event, GST_EVENT_TYPE_NAME (event));
+  }
+  gst_object_unref (pad);
+
+  /* continue on other pads, even if one failed */
+  return TRUE;
+}
+
+/* forwards the event to all sinkpads, takes ownership of the
+ * event
+ *
+ * Returns: TRUE if the event could be forwarded on all
+ * sinkpads.
+ */
+static gboolean
+forward_event (GstAVSynthVideoFilter * filter, GstEvent * event, gboolean flush)
+{
+  gboolean ret;
+  GstIterator *it;
+  GstIteratorResult ires;
+  GValue vret = { 0 };
+  EventData data;
+
+  GST_LOG_OBJECT (filter, "Forwarding event %p (%s)", event,
+      GST_EVENT_TYPE_NAME (event));
+
+  ret = TRUE;
+  data.event = event;
+  data.flush = flush;
+
+  g_value_init (&vret, G_TYPE_BOOLEAN);
+  g_value_set_boolean (&vret, TRUE);
+  it = gst_element_iterate_sink_pads (GST_ELEMENT_CAST (filter));
+  while (TRUE) {
+    ires = gst_iterator_fold (it, (GstIteratorFoldFunction) forward_event_func,
+        &vret, &data);
+    switch (ires) {
+      case GST_ITERATOR_RESYNC:
+        GST_WARNING ("resync");
+        gst_iterator_resync (it);
+        g_value_set_boolean (&vret, TRUE);
+        break;
+      case GST_ITERATOR_OK:
+      case GST_ITERATOR_DONE:
+        ret = g_value_get_boolean (&vret);
+        goto done;
+      default:
+        ret = FALSE;
+        goto done;
+    }
+  }
+done:
+  gst_iterator_free (it);
+  GST_LOG_OBJECT (filter, "Forwarded event %p (%s), ret=%d", event,
+      GST_EVENT_TYPE_NAME (event), ret);
+  gst_event_unref (event);
+
+  return ret;
+}
+
 gboolean
 gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
 {
   GstAVSynthVideoFilter *avsynth_video_filter;
   gboolean res = FALSE;
+
+  GST_DEBUG_OBJECT (pad, "Processing an event");
 
   avsynth_video_filter = (GstAVSynthVideoFilter *) gst_pad_get_parent (pad);
 
@@ -666,15 +756,13 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
     }
     default:
       /* forward upstream */
-      for (guint i = 0; i < avsynth_video_filter->sinkpads->len; i++)
-      {
-        GstPad *sinkpad = (GstPad *) g_ptr_array_index (avsynth_video_filter->sinkpads, i);
-        res = gst_pad_push_event (sinkpad, event);
-      }
+      forward_event (avsynth_video_filter, event, FALSE);
       break;
   }
 
   gst_object_unref (avsynth_video_filter);
+
+  GST_DEBUG_OBJECT (pad, "Finished processing an event");
 
   return res;
 }

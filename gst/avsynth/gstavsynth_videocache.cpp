@@ -188,7 +188,7 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
   /* It is guaranteed that at this moment we have at least one free unused
    * array element left. At least it should be guaranteed...
    */
-  GST_DEBUG ("Video cache %d: cache size = %" G_GUINT64_FORMAT ", adding a buffer", (gpointer) this, size);
+  GST_DEBUG ("Video cache %d: cache size = %" G_GUINT64_FORMAT ", adding a buffer %p (%p)", (gpointer) this, size, ivf, buf_ptr);
   g_ptr_array_index (bufs, size++) = (gpointer) buf_ptr;
 
   /* Buffer is full, meaning that a filter is not processing frames
@@ -202,7 +202,7 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
     /* Cache is relatively small, we can expand it */
     if (G_UNLIKELY (touched_last_time * 3 > used_size))
     {
-      GST_DEBUG ("Video cache %d: cache is relatively small, expanding...", (gpointer) this);
+      GST_DEBUG ("Video cache %d: cache is relatively small (%" G_GUINT64_FORMAT " > %" G_GUINT64_FORMAT "), expanding...", (gpointer) this, touched_last_time * 3, used_size);
       Resize (used_size + 1);
     }
     /* Cache is big enough, block incoming data 'til we get some free space */
@@ -334,9 +334,9 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
       g_cond_wait (vcache_cond, vcache_mutex);
   }
 
-  GST_DEBUG ("Video cache %d: touching and returning frame %" G_GUINT64_FORMAT, (gpointer) this, n);
   ret = (PVideoFrame *) g_ptr_array_index (bufs, n - rng_from);
-  ivf = (ImplVideoFrameBuffer *) ((void *) ret);
+  ivf = (ImplVideoFrameBuffer *) (*ret)->GetFrameBuffer();
+  GST_DEBUG ("Video cache %d: touching and returning frame %" G_GUINT64_FORMAT ", %p (%p)", (gpointer) this, n, ivf, ret);
   ivf->touched = TRUE;
 
   g_mutex_unlock (vcache_mutex);
@@ -373,11 +373,12 @@ void
 GstAVSynthVideoCache::ClearUntouched()
 {
   gboolean found_touched = FALSE;
-  touched_last_time = 0;
   guint64 removed = 0;
   ImplVideoFrameBuffer *ivf;
 
   g_mutex_lock (vcache_mutex);
+
+  touched_last_time = 0;
 
   GST_DEBUG ("Video cache %d: Clearing untouched frames. Cache range=%"
       G_GUINT64_FORMAT "+ %" G_GUINT64_FORMAT ", size=%" G_GUINT64_FORMAT,
@@ -401,7 +402,7 @@ GstAVSynthVideoCache::ClearUntouched()
     if (vf == NULL)
       break;
 
-    ivf = (ImplVideoFrameBuffer *) ((void *) vf);
+    ivf = (ImplVideoFrameBuffer *) (*vf)->GetFrameBuffer();
     if (ivf->touched || found_touched)
     {
       /* This buffer was used in the last cycle */

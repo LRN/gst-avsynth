@@ -483,18 +483,30 @@ gst_avsynth_video_filter_framegetter (void *data)
     outbuf = gst_avsynth_ivf_to_buf (vf, avsynth_video_filter->impl->GetVideoInfo());
 
     GST_BUFFER_OFFSET (outbuf) = framenumber;
+
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Cleaning all caches");
     
     for (guint i = 0; i < avsynth_video_filter->videocaches->len; i++)
     {
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Obtaining cache #%d", i);
       GstAVSynthVideoCache *vcache = (GstAVSynthVideoCache *) g_ptr_array_index (avsynth_video_filter->videocaches, i);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Calling ClearUntouched() for cache #%d", i);
       vcache->ClearUntouched();
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Returned from ClearUntouched() for cache #%d", i);
     }
 
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Pushing a frame downstream");
+ 
     gst_pad_push (avsynth_video_filter->srcpad, outbuf);
+
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Locking stop_mutex");
 
     g_mutex_lock (avsynth_video_filter->stop_mutex);
     stop = avsynth_video_filter->stop;
     g_mutex_unlock (avsynth_video_filter->stop_mutex);
+
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Unlocked stop_mutex");
+
     framenumber++;
   }
   GST_DEBUG_OBJECT (avsynth_video_filter, "Stopped");
@@ -616,6 +628,8 @@ gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
   GstAVSynthVideoFilter *avsynth_video_filter;
   gboolean res;
 
+  GST_DEBUG_OBJECT (pad, "Processing a query");
+ 
   avsynth_video_filter = (GstAVSynthVideoFilter *) gst_pad_get_parent (pad);
 
   res = FALSE;
@@ -628,6 +642,8 @@ gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
   }
 
   gst_object_unref (avsynth_video_filter);
+
+  GST_DEBUG_OBJECT (pad, "Finished processing a query");
 
   return res;
 }
@@ -847,13 +863,15 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
       GST_TIME_FORMAT, GST_BUFFER_SIZE (inbuf), GST_BUFFER_OFFSET (inbuf),
       GST_TIME_ARGS (in_timestamp), GST_TIME_ARGS (in_duration));
 
+  GST_OBJECT_LOCK (avsynth_video_filter);
+
   if (G_UNLIKELY (avsynth_video_filter->uninitialized))
   {
     AVSValue *arguments;
     gint sinkcount = 0;
     AVSValue clipval;
     gboolean ready = TRUE;
-  
+
     GST_DEBUG_OBJECT (pad, "Attempting to create the filter");
 
     arguments = new AVSValue[oclass->properties->len];
@@ -924,6 +942,8 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
     gst_task_start (avsynth_video_filter->framegetter);
   }
 
+  GST_OBJECT_UNLOCK (avsynth_video_filter);
+
   vcache = (GstAVSynthVideoCache *) g_object_get_data (G_OBJECT (pad), "video-cache");
   if (G_UNLIKELY (!vcache))
     goto not_negotiated;
@@ -940,6 +960,7 @@ not_negotiated:
     GST_ELEMENT_ERROR (avsynth_video_filter, CORE, NEGOTIATION, (NULL),
         ("%s: filter was not initialized before data start",
             oclass->name));
+    GST_OBJECT_UNLOCK (avsynth_video_filter);
     gst_buffer_unref (inbuf);
     return GST_FLOW_NOT_NEGOTIATED;
   }

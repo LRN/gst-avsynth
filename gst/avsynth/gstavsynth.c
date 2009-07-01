@@ -29,12 +29,13 @@
 /**
  * SECTION:element-avsynth
  *
- * FIXME:Describe avsynth here.
+ * AVSynth is a wrapper that calls various AviSynth filters. As such, it does
+ * nothing by itself.
  *
  * <refsect2>
- * <title>Example launch line</title>
+ * <title>Launching sample AVSynth filter (overlays part of video stream#1 over video stream#0)</title>
  * |[
- * gst-launch -v -m fakesrc ! avsynth ! fakesink silent=TRUE
+ * gst-launch-0.10 avsynth_SimpleSample name=filter SIZE=100 ! glimagesink videotestsrc ! filter.sink0 videotestsrc ! filter.sink1
  * ]|
  * </refsect2>
  */

@@ -24,9 +24,7 @@ gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *c
 {
   gboolean ret = TRUE;
   GstVideoFormat vf;
-//  GstStructure *str;
   gint fps_num = 0, fps_den = 0;
-//  guint32 fourcc = 0;
   gint width = 0, height = 0;
   gboolean interlaced;
   GstFormat qfmt = GST_FORMAT_DEFAULT;
@@ -97,6 +95,7 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
 {
   PVideoFrame *buf_ptr;
   ImplVideoFrameBuffer *ivf;
+  AVSynthSink *sink;
 
   guint8 *in_data;
   guint in_size;
@@ -114,31 +113,44 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
   in_duration = GST_BUFFER_DURATION (inbuf);
   in_offset = GST_BUFFER_OFFSET (inbuf);
 
-  g_mutex_lock (vcache_mutex);
+  sink = (AVSynthSink *) g_object_get_data (G_OBJECT (pad), "sinkstruct");
 
-  if (size >= used_size)
+/*  GST_DEBUG ("Video cache %p: locking vcache_mutex", (gpointer) this);
+
+  g_mutex_lock (vcache_mutex);*/
+
+  GST_DEBUG ("Video cache %p: locking sinkmutex", (gpointer) this);
+
+  g_mutex_lock (sink->sinkmutex);
+
+  if (size >= used_size && !sink->flush)
   {
-    GST_DEBUG ("Video cache %d: blocking at frame %" G_GUINT64_FORMAT, (gpointer) this, in_offset);
-    while (size >= used_size)
+    GST_DEBUG ("Video cache %p: blocking at frame %" G_GUINT64_FORMAT, (gpointer) this, in_offset);
+    while (size >= used_size && !sink->flush && !sink->seek)
     {
-      GST_DEBUG ("Video cache %d: sleeping while waiting at frame %" G_GUINT64_FORMAT
+      //g_mutex_unlock (sink->sinkmutex);
+      //GST_DEBUG ("Video cache %p: unlocked sinkmutex", (gpointer) this);
+      GST_DEBUG ("Video cache %p: sleeping while waiting at frame %" G_GUINT64_FORMAT
         ", cache range%" G_GUINT64_FORMAT "+ %" G_GUINT64_FORMAT
         ", size=%" G_GUINT64_FORMAT, (gpointer) this, in_offset, rng_from, used_size,
         size);
-      g_cond_wait (vcache_block_cond, vcache_mutex);
-      GST_DEBUG ("Video cache %d: woke up while waiting at frame %" G_GUINT64_FORMAT
+      g_cond_wait (vcache_block_cond, sink->sinkmutex);
+      GST_DEBUG ("Video cache %p: woke up while waiting at frame %" G_GUINT64_FORMAT
         ", cache range%" G_GUINT64_FORMAT "+ %" G_GUINT64_FORMAT
         ", size=%" G_GUINT64_FORMAT, (gpointer) this, in_offset, rng_from, used_size,
         size);
+      //GST_DEBUG ("Video cache %p: locking sinkmutex", (gpointer) this);
+      //g_mutex_lock (sink->sinkmutex);
     }
   }
+  
 
   /* We've been seeking backwards and the seek wasn't very precise, so
    * we're getting frames previous to the frame we need
    */
-  if (G_UNLIKELY (in_offset < rng_from))
+  if (G_UNLIKELY (in_offset < rng_from || sink->flush))
   {
-    GST_DEBUG ("Video cache %d: skipping frame %" G_GUINT64_FORMAT " < %" G_GUINT64_FORMAT, (gpointer) this, in_offset, rng_from);
+    GST_DEBUG ("Video cache %p: skipping frame %" G_GUINT64_FORMAT " < %" G_GUINT64_FORMAT, (gpointer) this, in_offset, rng_from);
     goto end;
   }
 
@@ -188,7 +200,7 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
   /* It is guaranteed that at this moment we have at least one free unused
    * array element left. At least it should be guaranteed...
    */
-  GST_DEBUG ("Video cache %d: cache size = %" G_GUINT64_FORMAT ", adding a buffer %p (%p)", (gpointer) this, size, ivf, buf_ptr);
+  GST_DEBUG ("Video cache %p: cache size = %" G_GUINT64_FORMAT ", adding a buffer %p (%p)", (gpointer) this, size, ivf, buf_ptr);
   g_ptr_array_index (bufs, size++) = (gpointer) buf_ptr;
 
   /* Buffer is full, meaning that a filter is not processing frames
@@ -197,21 +209,21 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
   if (G_UNLIKELY (used_size <= size))
   {
     if (size > used_size)
-      GST_ERROR ("Video cache %d: buffer overflow - %" G_GUINT64_FORMAT " > %" G_GUINT64_FORMAT, (gpointer) this, used_size, size);
-    GST_DEBUG ("Video cache %d: cache is full", (gpointer) this);
+      GST_ERROR ("Video cache %p: buffer overflow - %" G_GUINT64_FORMAT " > %" G_GUINT64_FORMAT, (gpointer) this, used_size, size);
+    GST_DEBUG ("Video cache %p: cache is full", (gpointer) this);
     /* Cache is relatively small, we can expand it */
     if (G_UNLIKELY (touched_last_time * 3 > used_size))
     {
-      GST_DEBUG ("Video cache %d: cache is relatively small (%" G_GUINT64_FORMAT " > %" G_GUINT64_FORMAT "), expanding...", (gpointer) this, touched_last_time * 3, used_size);
+      GST_DEBUG ("Video cache %p: cache is relatively small (%" G_GUINT64_FORMAT " > %" G_GUINT64_FORMAT "), expanding...", (gpointer) this, touched_last_time * 3, used_size);
       Resize (used_size + 1);
     }
     /* Cache is big enough, block incoming data 'til we get some free space */
     else
     {/*
-      GST_DEBUG ("Video cache %d: cache is large enough, blocking the pad", (gpointer) this);
+      GST_DEBUG ("Video cache %p: cache is large enough, blocking the pad", (gpointer) this);
       if (G_UNLIKELY (!gst_pad_set_blocked_async (pad, TRUE, block_callback, NULL)))
       {
-        GST_DEBUG ("Video cache %d: can't block the pad. Is it unblocked?", (gpointer) this); 
+        GST_DEBUG ("Video cache %p: can't block the pad. Is it unblocked?", (gpointer) this); 
         if (G_UNLIKELY (!gst_pad_is_blocked (pad)))
           GST_WARNING_OBJECT (pad, "Failed to block a pad that is not blocked");
       }
@@ -224,11 +236,17 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
    * a buffer
    * FIXME: Maybe we SHOULD know that? Just how taxing g_cond_signal() is?
    */
-  GST_DEBUG ("Video cache %d: signaling newframe", (gpointer) this);
+  GST_DEBUG ("Video cache %p: signaling newframe", (gpointer) this);
   g_cond_signal (vcache_cond);
 
 end:
-  g_mutex_unlock (vcache_mutex);
+  g_mutex_unlock (sink->sinkmutex);
+ 
+  GST_DEBUG ("Video cache %p: unlocked sinkmutex", (gpointer) this);
+
+  /*g_mutex_unlock (vcache_mutex);
+
+  GST_DEBUG ("Video cache %p: unlocked vcache_mutex", (gpointer) this);*/
 
   return TRUE;
 
@@ -250,8 +268,21 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
   PVideoFrame *ret = NULL;
   ImplVideoFrameBuffer *ivf;
   guint64 n;
+  AVSynthSink *sink;
 
-  g_mutex_lock (vcache_mutex);
+  sink = (AVSynthSink *) g_object_get_data (G_OBJECT (pad), "sinkstruct");
+
+  GST_DEBUG ("Video cache %p: frame %d is requested", (gpointer) this, in_n);
+
+  /*GST_DEBUG ("Video cache %p: locking vcache_mutex", (gpointer) this);
+
+  g_mutex_lock (vcache_mutex);*/
+ 
+  GST_DEBUG ("Video cache %p: locking sinkmutex", (gpointer) this);
+
+  g_mutex_lock (sink->sinkmutex);
+
+  GST_DEBUG ("Video cache %p: locked the pad", (gpointer) this);
 
   /* Make sure 0 >= n < num_frames, but only if duration is known */
   if (vi.num_frames >= 0)
@@ -259,17 +290,18 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
   else
     n = in_n;
 
-  GST_DEBUG ("Video cache %d: frame %" G_GUINT64_FORMAT
+  GST_DEBUG ("Video cache %p: frame %" G_GUINT64_FORMAT
       " is requested. Cache range=%" G_GUINT64_FORMAT "+ %" G_GUINT64_FORMAT
       ", size=%" G_GUINT64_FORMAT, (gpointer) this, n, rng_from, used_size,
       size);
+
   /* Filter asked for a frame we haven't reached yet */
-  if (size == 0 || rng_from + size - 1 < n)
+  if ((size == 0 || rng_from + size - 1 < n) && !sink->seek)
   {
-    GST_DEBUG ("Video cache %d: frame %" G_GUINT64_FORMAT " is not yet in the cache", (gpointer) this, n);
+    GST_DEBUG ("Video cache %p: frame %" G_GUINT64_FORMAT " is not yet in the cache", (gpointer) this, n);
     if (G_UNLIKELY (rng_from + used_size - 1 < n))
     {
-      GST_DEBUG ("Video cache %d: frame %" G_GUINT64_FORMAT " is out of reach", (gpointer) this, n);
+      GST_DEBUG ("Video cache %p: frame %" G_GUINT64_FORMAT " is out of reach", (gpointer) this, n);
       Resize (n - rng_from - used_size);
     }
 /*
@@ -277,30 +309,43 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
       if (G_UNLIKELY (gst_pad_is_blocked (pad)))
         GST_WARNING_OBJECT (pad, "Failed to unblock a pad that is blocked");
 */
-    GST_DEBUG ("Video cache %d: signalling getnewframe", (gpointer) this);
+    GST_DEBUG ("Video cache %p: signalling getnewframe", (gpointer) this);
     g_cond_signal (vcache_block_cond);
 
-    GST_DEBUG ("Video cache %d: waiting for frame %" G_GUINT64_FORMAT, (gpointer) this, n);
+    GST_DEBUG ("Video cache %p: waiting for frame %" G_GUINT64_FORMAT, (gpointer) this, n);
     /* Wait until GStreamer gives us enough frames to reach the frame n */
-    while (size == 0 || size - 1 < n - rng_from)
+    /* Don't wait if the sink got EOS (we won't get any more buffers).
+     * FIXME: It's a bit trickier with flushing. We can't tell the filter to abort
+     * current GetFrame() call. And we can't tell upstream pipeline that it should give us
+     * a few more frames before starting to flush. The best solution i see is to return
+     * non-frame frame, let the filter throw an exception (hopefully, something non-fatal
+     * that we can catch and the filter won't die completely) and return to the frame getter
+     * thread. Or we can return blank dummy frame - but that could affect internal state
+     * of the filter.
+     */
+    while ((size == 0 || size - 1 < n - rng_from) && !sink->eos && !sink->flush)
     {
-      GST_DEBUG ("Video cache %d: sleeping while waiting for frame %" G_GUINT64_FORMAT
+      /*g_mutex_unlock (sink->sinkmutex);
+      GST_DEBUG ("Video cache %p: unlocked sinkmutex", (gpointer) this);*/
+      GST_DEBUG ("Video cache %p: sleeping while waiting for frame %" G_GUINT64_FORMAT
         ", cache range%" G_GUINT64_FORMAT "+ %" G_GUINT64_FORMAT
         ", size=%" G_GUINT64_FORMAT, (gpointer) this, n, rng_from, used_size,
         size);
-      g_cond_wait (vcache_cond, vcache_mutex);
-      GST_DEBUG ("Video cache %d: waked up while waiting for frame %" G_GUINT64_FORMAT
+      g_cond_wait (vcache_cond, sink->sinkmutex);
+      GST_DEBUG ("Video cache %p: waked up while waiting for frame %" G_GUINT64_FORMAT
         ", cache range%" G_GUINT64_FORMAT "+ %" G_GUINT64_FORMAT
         ", size=%" G_GUINT64_FORMAT, (gpointer) this, n, rng_from, used_size,
         size);
+      /*GST_DEBUG ("Video cache %p: locking sinkmutex", (gpointer) this);
+      g_mutex_lock (sink->sinkmutex); */
     }
   }
   /* Filter asked for a frame we already discarded */
-  else if (n < rng_from)
+  else if (n < rng_from && !sink->seek)
   {
     GstEvent *seek_event;
 
-    GST_DEBUG ("Video cache %d: frame %" G_GUINT64_FORMAT " was left behind", (gpointer) this, n);
+    GST_DEBUG ("Video cache %p: frame %" G_GUINT64_FORMAT " was left behind", (gpointer) this, n);
     Resize (used_size + (rng_from - n));
 
     /* Seek backwards to frame n */
@@ -325,21 +370,40 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
       if (G_UNLIKELY (gst_pad_is_blocked (pad)))
         GST_WARNING_OBJECT (pad, "Failed to unblock a pad that is blocked");
 */
-    GST_DEBUG ("Video cache %d: signalling getnewframe", (gpointer) this);
+    GST_DEBUG ("Video cache %p: signalling getnewframe", (gpointer) this);
     g_cond_signal (vcache_block_cond);
 
-    GST_DEBUG ("Video cache %d: waiting for frame %" G_GUINT64_FORMAT, (gpointer) this, n);
+    GST_DEBUG ("Video cache %p: waiting for frame %" G_GUINT64_FORMAT, (gpointer) this, n);
     /* Wait until GStreamer gives enough frames */
-    while (size == 0)
-      g_cond_wait (vcache_cond, vcache_mutex);
+    while (size == 0 && !sink->eos && !sink->flush)
+    {
+      /*g_mutex_unlock (sink->sinkmutex);
+      GST_DEBUG ("Video cache %p: unlocked sinkmutex", (gpointer) this);*/
+      g_cond_wait (vcache_cond, sink->sinkmutex);
+      /*GST_DEBUG ("Video cache %p: locking sinkmutex", (gpointer) this);
+      g_mutex_lock (sink->sinkmutex);*/
+    }
   }
 
-  ret = (PVideoFrame *) g_ptr_array_index (bufs, n - rng_from);
-  ivf = (ImplVideoFrameBuffer *) (*ret)->GetFrameBuffer();
-  GST_DEBUG ("Video cache %d: touching and returning frame %" G_GUINT64_FORMAT ", %p (%p)", (gpointer) this, n, ivf, ret);
-  ivf->touched = TRUE;
+  if (!sink->eos && !sink->flush)
+  {
+    ret = (PVideoFrame *) g_ptr_array_index (bufs, n - rng_from);
+    ivf = (ImplVideoFrameBuffer *) (*ret)->GetFrameBuffer();
+    GST_DEBUG ("Video cache %p: touching and returning frame %" G_GUINT64_FORMAT ", %p (%p)", (gpointer) this, n, ivf, ret);
+    ivf->touched = TRUE;
+  }
+  else
+  {
+    ret = new PVideoFrame();
+  }
 
-  g_mutex_unlock (vcache_mutex);
+  g_mutex_unlock (sink->sinkmutex);
+
+  GST_DEBUG ("Video cache %p: unlocked sinkmutex", (gpointer) this);
+
+  /*g_mutex_unlock (vcache_mutex);
+
+  GST_DEBUG ("Video cache %p: unlocked vcache_mutex", (gpointer) this);*/
 
   return *ret;
 }
@@ -375,12 +439,18 @@ GstAVSynthVideoCache::ClearUntouched()
   gboolean found_touched = FALSE;
   guint64 removed = 0;
   ImplVideoFrameBuffer *ivf;
+  AVSynthSink *sink;
 
-  g_mutex_lock (vcache_mutex);
+  sink = (AVSynthSink *) g_object_get_data (G_OBJECT (pad), "sinkstruct");
+
+  /*GST_DEBUG ("Video cache %p: locking vcache_mutex", (gpointer) this);
+  
+  g_mutex_lock (vcache_mutex);*/
+  g_mutex_lock (sink->sinkmutex);
 
   touched_last_time = 0;
 
-  GST_DEBUG ("Video cache %d: Clearing untouched frames. Cache range=%"
+  GST_DEBUG ("Video cache %p: Clearing untouched frames. Cache range=%"
       G_GUINT64_FORMAT "+ %" G_GUINT64_FORMAT ", size=%" G_GUINT64_FORMAT,
       (gpointer) this, rng_from, used_size, size);
 
@@ -411,7 +481,7 @@ GstAVSynthVideoCache::ClearUntouched()
         touched_last_time++;
         if (!found_touched)
         {
-          GST_DEBUG ("Video cache %d: first touched frame is %" G_GUINT64_FORMAT, (gpointer) this, removed);
+          GST_DEBUG ("Video cache %p: first touched frame is %" G_GUINT64_FORMAT, (gpointer) this, removed);
           /* Don't delete buffers anymore (we don't want any gaps) */
           found_touched = TRUE;
         }
@@ -421,7 +491,7 @@ GstAVSynthVideoCache::ClearUntouched()
     /* Buffer was not touched and there are no touched buffers before it */
     else if (!found_touched)
     {
-      GST_DEBUG ("Video cache %d: Removing frame %"
+      GST_DEBUG ("Video cache %p: Removing frame %"
           G_GUINT64_FORMAT, (gpointer) this, i);
 
       /* Delete it and reiterate */
@@ -432,16 +502,66 @@ GstAVSynthVideoCache::ClearUntouched()
       removed++;
     }
   }
-  GST_DEBUG ("Video cache %d: touched %" G_GUINT64_FORMAT " frames, removed %" G_GUINT64_FORMAT " frames", (gpointer) this, touched_last_time, removed);
+  GST_DEBUG ("Video cache %p: touched %" G_GUINT64_FORMAT " frames, removed %" G_GUINT64_FORMAT " frames", (gpointer) this, touched_last_time, removed);
 
   size -= removed;
   rng_from += removed;
 
   if (size < used_size)
   {
-    GST_DEBUG ("Video cache %d: signalling getnewframe", (gpointer) this);
+    GST_DEBUG ("Video cache %p: signalling getnewframe", (gpointer) this);
     g_cond_signal (vcache_block_cond);
   }
 
-  g_mutex_unlock (vcache_mutex);  
+  if (sink->seek)
+  {
+    seek = TRUE;
+    sink->seek = FALSE;
+  }
+
+  /*g_mutex_unlock (vcache_mutex);  
+
+  GST_DEBUG ("Video cache %p: unlocked vcache_mutex", (gpointer) this);
+  */
+  g_mutex_unlock (sink->sinkmutex);
+}
+
+void
+GstAVSynthVideoCache::Clear()
+{
+  ImplVideoFrameBuffer *ivf;
+  AVSynthSink *sink;
+
+  sink = (AVSynthSink *) g_object_get_data (G_OBJECT (pad), "sinkstruct");
+
+/*  GST_DEBUG ("Video cache %p: locking vcache_mutex", (gpointer) this);
+
+  g_mutex_lock (vcache_mutex);*/
+  g_mutex_lock (sink->sinkmutex);
+
+  GST_DEBUG ("Video cache %p: Clearing all frames", (gpointer) this);
+
+  for (guint64 i = 0; i < size; i++)
+  {
+    PVideoFrame *vf = (PVideoFrame *) g_ptr_array_index (bufs, i);
+
+    if (vf == NULL)
+      break;
+
+    ivf = (ImplVideoFrameBuffer *) (*vf)->GetFrameBuffer();
+
+    delete vf;
+    g_ptr_array_index (bufs, i) = NULL;
+  }
+
+  size  = 0;
+  rng_from = G_MAXUINT64;
+
+  GST_DEBUG ("Video cache %p: signalling getnewframe", (gpointer) this);
+  g_cond_signal (vcache_block_cond);
+
+/*  g_mutex_unlock (vcache_mutex);
+
+  GST_DEBUG ("Video cache %p: unlocked vcache_mutex", (gpointer) this);*/
+  g_mutex_unlock (sink->sinkmutex);
 }

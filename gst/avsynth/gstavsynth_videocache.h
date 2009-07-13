@@ -57,23 +57,31 @@ private:
    */
   VideoInfo vi;
 
-  GMutex *vcache_mutex;
-  GCond *vcache_cond;
+//  GMutex *vcache_mutex;
+
   GCond *vcache_block_cond;
 
-  /* A pad to which this cache is attached */
+  /* A pad to which this cache is attached to */
   GstPad *pad;
 
+  /* AVSynthSink->seek is set once we get a seek event, while this variable
+   * is set *only* between calls to GetFrame(), so if it will always be TRUE
+   * only for the first call to cache's GetFrame() for a given call to
+   * filter's GetFrame().
+   */
+  gboolean seek;
+
 public:
+  GCond *vcache_cond;
   /* start_size defines both the size of underlying array and the number of
    * elements of that array used for cache.
    */
   GstAVSynthVideoCache(VideoInfo *init_vi, GstPad *in_pad, gint start_size = 10): bufs(g_ptr_array_new ()), rng_from (0), used_size (start_size), size (0), touched_last_time(0)
   {
     g_memmove (&vi, init_vi, sizeof (VideoInfo));
-    vcache_mutex = g_mutex_new();
-    vcache_cond = g_cond_new();
-    vcache_block_cond = g_cond_new();
+    //vcache_mutex = g_mutex_new ();
+    vcache_cond = g_cond_new ();
+    vcache_block_cond = g_cond_new ();
     pad = in_pad;
     g_object_ref (pad);
     g_ptr_array_set_size (bufs, start_size);
@@ -85,8 +93,8 @@ public:
       delete (PVideoFrame *) g_ptr_array_index (bufs, i);
     g_ptr_array_free (bufs, TRUE);
     g_object_unref (pad);
-    g_mutex_unlock (vcache_mutex);
-    g_mutex_free (vcache_mutex);
+//    g_mutex_unlock (vcache_mutex);
+//    g_mutex_free (vcache_mutex);
     g_cond_free (vcache_cond);
     g_cond_free (vcache_block_cond);
   }
@@ -108,6 +116,8 @@ public:
   const VideoInfo& __stdcall GetVideoInfo();
 
   void ClearUntouched();
+
+  void Clear();
 };
 
 #endif /* __GST_AVSYNTH_VIDEOCACHE_H__ */

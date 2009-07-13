@@ -36,6 +36,7 @@ typedef struct _GstAVSynthVideoFilterClass GstAVSynthVideoFilterClass;
 typedef struct _GstAVSynthVideoFilterClassParams GstAVSynthVideoFilterClassParams;
 
 #include "gstavsynth_scriptenvironment.h"
+#include "gstavsynth_videocache.h"
 
 G_BEGIN_DECLS
 
@@ -45,6 +46,33 @@ G_BEGIN_DECLS
 #define GST_AVSYNTH_VIDEO_FILTER_CLASS(klass)		(G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_AVSYNTH_VIDEO_FILTER,GstAVSynthVideoFilterClass))
 #define GST_IS_AVSYNTH_VIDEO_FILTER_CLASS(klass)	(G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_AVSYNTH_VIDEO_FILTER))
 #define GST_AVSYNTH_VIDEO_FILTER_GET_CLASS(obj)		(G_TYPE_CHECK_CLASS_TYPE((obj),GST_TYPE_AVSYNTH_VIDEO_FILTER, GstAVSynthVideoFilterclass))
+
+/* Groups sinkpad handle, videocache handle and related information */
+struct AVSynthSink
+{
+  /* Sink handle */
+  GstPad *sinkpad;
+
+  /* Cache object (starts at NULL, allocated when we get data) */
+  GstAVSynthVideoCache *cache;
+
+  /* Segment we've got from upstream on this pad, different for each pad */
+  GstSegment segment;
+
+  /* Segment we've made by converting segment to default format */
+  GstSegment defsegment;
+
+  /* TRUE if we've got EOS on this pad (set to FALSE on newsegment) */
+  gboolean eos;
+
+  /* TRUE if we're flushing */
+  gboolean flush;
+
+  /* TRUE if we've got a seek event from downstream */
+  gboolean seek;
+
+  GMutex *sinkmutex;
+};
 
 struct _GstAVSynthVideoFilter
 {
@@ -58,32 +86,43 @@ struct _GstAVSynthVideoFilter
 
   /* An object that implements the function */
   PClip impl;
+  GMutex *impl_mutex;
 
   ScriptEnvironment *env;
 
   /* We need to keep track of our pads, so we do so here. */
   GstPad *srcpad;
 
-  /* Array of GstPad */
-  GPtrArray *sinkpads;
+  /* Array of AVSynthSink pointers */
+  GPtrArray *sinks;
 
-  /* Array of GstAVSynthVideoCache, one element per sinkpad */
-  GPtrArray *videocaches;
-  GMutex *videocaches_mutex;
-
-  /* clipping segment */
+  /* Segment of the output video stream */
   GstSegment segment;
+  
+  /* New segment we've got from a seek event */
+  GstSegment seeksegment;
+
+  /* TRUE if we should rebuild our segment */
+  gboolean newsegment;
+
+  /* Frame counter, changes on seek */
+/*  guint64 framenum;*/
 
   /* A thread that keeps calling GetFrame() method of the underlying filter */
   GstTask *framegetter;
   GStaticRecMutex *framegetter_mutex;
-  gboolean getting_frames;
 
-  /* Tells the framegetter thread to stop */
+  /* Tells the framegetter thread to stop or pause*/
   gboolean stop;
+  gboolean pause;
+  GCond *pause_cond;
   GMutex *stop_mutex;
 
+  /* An array to store GObject properties to be passes to apply() */
   AVSValue **args;  
+
+  /* VideoInfo of the last output buffer */
+  VideoInfo vi;
 };
 
 struct AVSynthVideoFilterParam
@@ -155,6 +194,9 @@ gboolean gst_avsynth_video_filter_negotiate (GstAVSynthVideoFilter * avsynth_vid
 #define GST_AVSYNTH_VIDEO_FILTER_PARAMS_QDATA g_quark_from_static_string("avsynth-video-filter-params")
 
 gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *caps, VideoInfo *vi);
+
+static gboolean gst_avsynth_video_filter_src_convert (GstPad * pad, GstFormat src_format, gint64 src_value,
+    GstFormat * dest_format, gint64 * dest_value);
 
 G_END_DECLS
 

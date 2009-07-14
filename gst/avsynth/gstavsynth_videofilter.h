@@ -72,6 +72,19 @@ struct AVSynthSink
   gboolean seek;
 
   GMutex *sinkmutex;
+
+  /* Is set to TRUE by framegetter before each call to GetFrame() */
+  gboolean firstcall;
+
+  /* After GetFrame() returns, these will contain the lowest frame intices that
+   * were requested since firstcall was TRUE.
+   */
+  gint64 minframe;
+  
+  /* Add this to current frame index to get the index of earliest frame
+   * required to produce current frame. Updated by framegetter.
+   */
+  gint64 maxframeshift;
 };
 
 struct _GstAVSynthVideoFilter

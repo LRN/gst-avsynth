@@ -569,10 +569,6 @@ gst_avsynth_video_filter_framegetter (void *data)
       g_mutex_unlock (sink->sinkmutex);
     }
 
-    /* FIXME: don't push if we're starving (last frame is incorrect anyway)? */
-
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Pushing a frame downstream");
-
     /* If the other thread wants us to pause, this is a good place to do so */
     g_mutex_lock (avsynth_video_filter->stop_mutex);
     while (!(stop = avsynth_video_filter->stop) && avsynth_video_filter->pause)
@@ -665,6 +661,8 @@ gst_avsynth_video_filter_framegetter (void *data)
       gst_buffer_unref (outbuf);
       continue;
     }
+    /* FIXME: don't push if we're starving (last frame is incorrect anyway)? */
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Pushing frame %" G_GUINT64_FORMAT" downstream, clip_start = %" G_GINT64_FORMAT, GST_BUFFER_OFFSET (outbuf), clip_start);
     gst_pad_push (avsynth_video_filter->srcpad, outbuf);
 
     /* For debuggnig */
@@ -689,23 +687,23 @@ gst_avsynth_video_filter_framegetter (void *data)
             NULL);
       else if (clip_start == 400)
         s = gst_structure_new ("GstAVSynthSeek",
-            "rate", G_TYPE_DOUBLE, 1.0,
-            "format", G_TYPE_INT, GST_FORMAT_DEFAULT,
-            "flags", G_TYPE_INT, 0,
-            "cur_type", G_TYPE_INT, GST_SEEK_TYPE_SET,
-            "cur", G_TYPE_INT64, 500,
-            "stop_type", G_TYPE_INT, GST_SEEK_TYPE_NONE,
-            "stop", G_TYPE_INT64, -1,
+            "rate", G_TYPE_DOUBLE, (gdouble) 1.0,
+            "format", G_TYPE_INT, (gint) GST_FORMAT_DEFAULT,
+            "flags", G_TYPE_INT, (gint) 0,
+            "cur_type", G_TYPE_INT, (gint) GST_SEEK_TYPE_SET,
+            "cur", G_TYPE_INT64, (gint64) 500,
+            "stop_type", G_TYPE_INT, (gint) GST_SEEK_TYPE_NONE,
+            "stop", G_TYPE_INT64, (gint64) -1,
             NULL);
       else if (clip_start == 700)
         s = gst_structure_new ("GstAVSynthSeek",
-            "rate", G_TYPE_DOUBLE, 1.0,
-            "format", G_TYPE_INT, GST_FORMAT_DEFAULT,
-            "flags", G_TYPE_INT, GST_SEEK_FLAG_FLUSH,
-            "cur_type", G_TYPE_INT, GST_SEEK_TYPE_SET,
-            "cur", G_TYPE_INT64, 200,
-            "stop_type", G_TYPE_INT, GST_SEEK_TYPE_NONE,
-            "stop", G_TYPE_INT64, -1,
+            "rate", G_TYPE_DOUBLE, (gdouble) 1.0,
+            "format", G_TYPE_INT, (gint) GST_FORMAT_DEFAULT,
+            "flags", G_TYPE_INT, (gint) GST_SEEK_FLAG_FLUSH,
+            "cur_type", G_TYPE_INT, (gint) GST_SEEK_TYPE_SET,
+            "cur", G_TYPE_INT64, (gint64) 200,
+            "stop_type", G_TYPE_INT, (gint) GST_SEEK_TYPE_NONE,
+            "stop", G_TYPE_INT64, (gint64) -1,
             NULL);
     
       m = gst_message_new_custom (GST_MESSAGE_ELEMENT, GST_OBJECT (avsynth_video_filter), s);
@@ -726,7 +724,7 @@ gst_avsynth_video_filter_framegetter (void *data)
     }
   }
 
-  GST_DEBUG_OBJECT (avsynth_video_filter, "Stopped");
+  GST_DEBUG_OBJECT (avsynth_video_filter, "Stopped: stop = %d, eos = %d", (gint) stop, (gint) eos);
   gst_object_unref (avsynth_video_filter);
 }
 
@@ -1231,7 +1229,7 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
     gst_pad_push_event (avsynth_video_filter->srcpad, tevent);
   } else {
     g_mutex_lock (avsynth_video_filter->stop_mutex);
-    avsynth_video_filter->stop = TRUE;
+    avsynth_video_filter->pause = TRUE;
     g_mutex_unlock (avsynth_video_filter->stop_mutex);
   }
 
@@ -1388,12 +1386,15 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
 
   /* and restart the task in case it got paused explicitely or by
    * the FLUSH_START event we pushed out. */
-  if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) == GST_TASK_STOPPED) && avsynth_video_filter->impl))
+  g_mutex_lock (avsynth_video_filter->stop_mutex);
+  avsynth_video_filter->pause = FALSE;
+  g_mutex_unlock (avsynth_video_filter->stop_mutex);
+/*  if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) == GST_TASK_STOPPED) && avsynth_video_filter->impl))
   {
     GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
     gst_task_start (avsynth_video_filter->framegetter);
   }
-
+*/
   /* and release the lock again so we can continue streaming */
   GST_PAD_STREAM_UNLOCK (avsynth_video_filter->srcpad);
 
@@ -1409,6 +1410,7 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
     g_mutex_lock (sink->sinkmutex);
     sink->seek = TRUE;
     sink->seekhint = seeksegment.time + sink->maxframeshift;
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Set sink seek hint to %" G_GUINT64_FORMAT, (gpointer) sink->cache, sink->seekhint);
     g_mutex_unlock (sink->sinkmutex);
     GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
   }

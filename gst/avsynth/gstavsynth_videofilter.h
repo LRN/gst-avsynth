@@ -73,6 +73,9 @@ struct AVSynthSink
 
   /* TRUE if we've got a seek event from downstream */
   gboolean seek;
+ 
+  /* TRUE if we're seeking upstream (cache->rng_from is up to date) */
+  gboolean seeking;
 
   /* If seek is TRUE, seek to this frame or earlier */
   gint64 seekhint;

@@ -69,6 +69,8 @@ class ImplVideoFrameBuffer: public VideoFrameBuffer
   friend class ImplVideoFrame;
 public:
   gboolean touched;
+  /* Frame index */
+  guint64 selfindex;
 
   ImplVideoFrameBuffer(int size);
   ImplVideoFrameBuffer();

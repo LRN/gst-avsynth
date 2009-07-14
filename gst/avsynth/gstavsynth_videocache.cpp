@@ -115,7 +115,7 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
   if (size >= used_size && !sink->flush)
   {
     GST_DEBUG ("Video cache %p: blocking at frame %" G_GUINT64_FORMAT, (gpointer) this, in_offset);
-    while (size >= used_size && !sink->flush && !sink->seek)
+    while (size >= used_size && !sink->flush && !sink->seeking)
     {
       GST_DEBUG ("Video cache %p: sleeping while waiting at frame %" G_GUINT64_FORMAT
         ", cache range%" G_GUINT64_FORMAT "+ %" G_GUINT64_FORMAT
@@ -133,17 +133,20 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
   /* We've been seeking backwards and the seek wasn't very precise, so
    * we're getting frames previous to the frame we need.
    * Or we're in seek mode and the frame is not the frame we're seeking to.
+   * If we've pushed a seek event and it moved the source to a frame after
+   * rng_from (i.e. the seek missed), this will turn into infinite loop.
    */
-  if (G_UNLIKELY (sink->flush || in_offset < rng_from && !sink->seek || sink->seek && in_offset != rng_from))
+  if (G_UNLIKELY (sink->flush || in_offset < rng_from && !sink->seeking || sink->seeking && in_offset != rng_from))
   {
     if (sink->flush)
       GST_DEBUG ("Video cache %p: skipping frame %" G_GUINT64_FORMAT " - flushing", (gpointer) this, in_offset);
-    else if (in_offset < rng_from && !sink->seek)
+    else if (in_offset < rng_from && !sink->seeking)
       GST_DEBUG ("Video cache %p: skipping frame %" G_GUINT64_FORMAT " < %" G_GUINT64_FORMAT, (gpointer) this, in_offset, rng_from);
     else
       GST_DEBUG ("Video cache %p: skipping frame %" G_GUINT64_FORMAT " - seeking to %" G_GUINT64_FORMAT, (gpointer) this, in_offset, rng_from);   
     goto end;
   }
+  sink->seeking = FALSE;
 
   gst_avsynth_buf_pad_caps_to_vi (inbuf, pad, GST_BUFFER_CAPS (inbuf), &vi);
 
@@ -187,6 +190,7 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
 
   ivf = (ImplVideoFrameBuffer *) ((*buf_ptr)->GetFrameBuffer());
   ivf->touched = FALSE;
+  ivf->selfindex = in_offset;
 
   /* It is guaranteed that at this moment we have at least one free unused
    * array element left. At least it should be guaranteed...
@@ -243,6 +247,7 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
   PVideoFrame *ret = NULL;
   ImplVideoFrameBuffer *ivf;
   guint64 n;
+  gint64 store_rng;
   AVSynthSink *sink;
 
   sink = (AVSynthSink *) g_object_get_data (G_OBJECT (pad), "sinkstruct");
@@ -251,6 +256,8 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
 
   GST_DEBUG ("Video cache %p: locking sinkmutex", (gpointer) this);
   g_mutex_lock (sink->sinkmutex);
+
+  store_rng = rng_from;
 
   if (sink->firstcall)
   {
@@ -338,12 +345,17 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
     size = 0;
     
     /* AddBuffer will discard all frames with number less than rng_from */
-    rng_from = n;
+    rng_from = sink->seekhint < n ? sink->seekhint : n;
+    /* Tells AddBuffer that rng_from is set and we are seeking, have to use
+     * this since sink->seek could be TRUE before we have a chance to update
+     * rng_from.
+     */
+    sink->seeking = TRUE;
 
     /* Seek to frame n (or use sinkhint - whichever is smaller)*/
     seek_event = gst_event_new_seek (1, GST_FORMAT_DEFAULT,
         (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
-        GST_SEEK_TYPE_SET, (gint64) (sink->seekhint < n ? sink->seekhint : n),
+        GST_SEEK_TYPE_SET, (gint64) rng_from,
         GST_SEEK_TYPE_NONE, -1);
 
     /* Wake up the stream thread (sinke sink->seek == TRUE, it will abort pengin AddBuffer and return
@@ -361,13 +373,13 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
     gst_pad_push_event (pad, seek_event);
     GST_DEBUG ("Video cache %p: seeked", (gpointer) this);
 
-    GST_DEBUG ("Video cache %p: waiting for frame %" G_GUINT64_FORMAT, (gpointer) this, n);
     /* Wait until GStreamer reaches the frame n. By this time AddBuffer is finished and unlocked
      * the sinkmutex, we can lock it back - we need it for waiting.
      */
     g_mutex_lock (sink->sinkmutex);
+    GST_DEBUG ("Video cache %p: waiting for frame %" G_GUINT64_FORMAT, (gpointer) this, rng_from);
     sink->seek = FALSE;
-    while (size == 0 && !sink->eos)
+    while ((size == 0 || rng_from + size < n + 1) && !sink->eos)
     {
       GST_DEBUG ("Video cache %p: waiting at stream lock %p", (gpointer) this, GST_PAD_GET_STREAM_LOCK (pad));
       g_cond_wait (vcache_cond, sink->sinkmutex);
@@ -379,13 +391,15 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
   {
     ret = (PVideoFrame *) g_ptr_array_index (bufs, n - rng_from);
     ivf = (ImplVideoFrameBuffer *) (*ret)->GetFrameBuffer();
-    GST_DEBUG ("Video cache %p: touching and returning frame %" G_GUINT64_FORMAT ", %p (%p)", (gpointer) this, n, ivf, ret);
+    GST_DEBUG ("Video cache %p: touching and returning frame %" G_GUINT64_FORMAT ", its calculated index is %" G_GUINT64_FORMAT", self index is %" G_GUINT64_FORMAT", %p (%p)", (gpointer) this, n, store_rng + (n - rng_from), ivf->selfindex, ivf, ret);
+    if (n != ivf->selfindex)
+      GST_ERROR ("Returning wrong frame");
     ivf->touched = TRUE;
   }
   else
   {
     ret = new PVideoFrame();
-    GST_WARNING ("Returning empty frame");
+    GST_WARNING ("Returning empty frame, rng_from = %" G_GINT64_FORMAT", size = %" G_GINT64_FORMAT", n = %"G_GINT64_FORMAT, rng_from, size, n);
     if (sink->eos)
       sink->starving = TRUE;
   }

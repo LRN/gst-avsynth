@@ -512,17 +512,17 @@ GstElement *debug_get_sink (GstElement *pipeline)
 void
 gst_avsynth_video_filter_framegetter (void *data)
 {
-  /* FIXME: normal implementation */
   GstAVSynthVideoFilter *avsynth_video_filter;
   gboolean stop = FALSE;
   gboolean push = TRUE;
+  gboolean eos = FALSE;
   gint64 clip_start, clip_end, framenum;
 
   /* FIXME: Uh...shouldn't i use typecast macro here? */
   avsynth_video_filter = (GstAVSynthVideoFilter *) data;
   gst_object_ref (avsynth_video_filter);
 
-  while (!stop)
+  while (!stop && !eos)
   {
     PVideoFrame vf = NULL;
     GstBuffer *outbuf;
@@ -550,6 +550,8 @@ gst_avsynth_video_filter_framegetter (void *data)
     g_mutex_unlock (avsynth_video_filter->impl_mutex);
     GST_DEBUG_OBJECT (avsynth_video_filter, "Unlocked impl_mutex");
 
+    eos = FALSE;
+
     GST_DEBUG_OBJECT (avsynth_video_filter, "Cleaning all caches");
     
     for (guint i = 0; i < avsynth_video_filter->sinks->len; i++)
@@ -563,12 +565,15 @@ gst_avsynth_video_filter_framegetter (void *data)
       g_mutex_lock (sink->sinkmutex);
       sink->firstcall = TRUE;
       sink->maxframeshift = sink->maxframeshift < sink->minframe - framenum ? sink->minframe - framenum : sink->maxframeshift;
+      eos |= sink->starving;
       g_mutex_unlock (sink->sinkmutex);
     }
 
+    /* FIXME: don't push if we're starving (last frame is incorrect anyway)? */
+
     GST_DEBUG_OBJECT (avsynth_video_filter, "Pushing a frame downstream");
 
-    /* If the other thread wants us to pause, this is a good place to do so*/
+    /* If the other thread wants us to pause, this is a good place to do so */
     g_mutex_lock (avsynth_video_filter->stop_mutex);
     while (!(stop = avsynth_video_filter->stop) && avsynth_video_filter->pause)
     {
@@ -578,6 +583,8 @@ gst_avsynth_video_filter_framegetter (void *data)
  
     if (G_UNLIKELY (stop))
       break;
+
+    /* Don't let anyone mess with newsegment and stop */
     g_mutex_lock (avsynth_video_filter->stop_mutex);
     if (G_UNLIKELY (avsynth_video_filter->newsegment))
     {
@@ -585,7 +592,7 @@ gst_avsynth_video_filter_framegetter (void *data)
       GstEvent *newsegevent;
       avsynth_video_filter->newsegment = FALSE;
       /* for deriving a stop position for the playback segment from the seek
-       * segment, we must take the duration when the stop is not set */
+       * segment, we must take the duration when stop is not set */
       if ((stop = avsynth_video_filter->segment.stop) == -1)
         stop = avsynth_video_filter->segment.duration;
   
@@ -594,8 +601,6 @@ gst_avsynth_video_filter_framegetter (void *data)
   
       /* now replace the old segment so that we send it in the stream thread the
        * next time it is scheduled. */
-      /*if (src->priv->start_segment)
-        gst_event_unref (src->priv->start_segment);*/
       if (avsynth_video_filter->segment.rate >= 0.0) {
         /* forward, we send data from last_stop to stop */
         newsegevent =
@@ -611,7 +616,9 @@ gst_avsynth_video_filter_framegetter (void *data)
       }
       gst_pad_push_event (avsynth_video_filter->srcpad, newsegevent);
     }
+
     push = TRUE;
+
     if (
       G_UNLIKELY (
         !gst_segment_clip (&avsynth_video_filter->segment, GST_FORMAT_DEFAULT, GST_BUFFER_OFFSET (outbuf), -1, &clip_start, &clip_end)
@@ -652,31 +659,16 @@ gst_avsynth_video_filter_framegetter (void *data)
       push = FALSE;
     }
     g_mutex_unlock (avsynth_video_filter->stop_mutex);
+
     if (G_UNLIKELY (!push))
     {
       gst_buffer_unref (outbuf);
       continue;
     }
     gst_pad_push (avsynth_video_filter->srcpad, outbuf);
-    if (clip_start == 50)
-    {
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Locking impl_mutex");
-      g_mutex_lock (avsynth_video_filter->impl_mutex);
-      avsynth_video_filter->segment.time = 30;
-      g_mutex_unlock (avsynth_video_filter->impl_mutex);
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Unlocked impl_mutex");
- 
-      for (guint i = 0; i < avsynth_video_filter->sinks->len; i++)
-      {
-        AVSynthSink *sink = NULL;
-        sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
-        g_mutex_lock (sink->sinkmutex);
-        sink->seek = TRUE;
-        g_mutex_unlock (sink->sinkmutex);
-      }
 
-    }
-    else if (clip_start == 100 || clip_start == 400 || clip_start == 700)
+    /* For debuggnig */
+    if (clip_start == 100 || clip_start == 400 || clip_start == 700)
     {
       GstElement *pipeline;
       GstStructure *s;
@@ -725,14 +717,17 @@ gst_avsynth_video_filter_framegetter (void *data)
       gst_object_unref (pipeline);
       gst_object_unref (b);
     }
+
+    if (eos)
+    {
+      GstEvent *eos_event;
+      eos_event = gst_event_new_eos ();
+      gst_pad_push_event (avsynth_video_filter->srcpad, eos_event);
+    }
   }
+
   GST_DEBUG_OBJECT (avsynth_video_filter, "Stopped");
   gst_object_unref (avsynth_video_filter);
-}
-
-GstPadLinkReturn gst_avsynth_video_filter_sink_link(GstPad *pad, GstPad *peer)
-{
-  return GST_PAD_LINK_OK;
 }
 
 void
@@ -795,9 +790,6 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
     gst_pad_set_chain_function (sink->sinkpad,
         GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_chain));
 
-    gst_pad_set_link_function (sink->sinkpad,
-        GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_sink_link));
-
     gst_element_add_pad (GST_ELEMENT (avsynth_video_filter), sink->sinkpad);
     sink->cache = NULL;
     sink->sinkmutex = g_mutex_new ();
@@ -844,7 +836,7 @@ gst_avsynth_video_filter_finalize (GObject * object)
   GstAVSynthVideoFilter *avsynth_video_filter = (GstAVSynthVideoFilter *) object;
 
   g_module_close (avsynth_video_filter->plugin);
-  /* TODO: free the stuff */
+  /* FIXME: free the stuff */
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -973,16 +965,6 @@ gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
       res = FALSE;
   }
 
-  /* FIXME: query implementation */
-  /* res = gst_pad_query_default (pad, query); */
-  /*
-  for (guint i = 0; i < avsynth_video_filter->sinkpads->len; i++)
-  {
-    GstPad *sinkpad = (GstPad *) g_ptr_array_index (avsynth_video_filter->sinkpads, i);
-    // Forward the query to the peer
-    res = gst_pad_peer_query (sinkpad, query);
-  }
-  */
   gst_object_unref (avsynth_video_filter);
 
   GST_DEBUG_OBJECT (pad, "Finished processing a query");
@@ -1373,12 +1355,13 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
 
     /* for deriving a stop position for the playback segment from the seek
      * segment, we must take the duration when the stop is not set */
+/*
     if ((stop = avsynth_video_filter->segment.stop) == -1)
       stop = avsynth_video_filter->segment.duration;
 
     GST_DEBUG_OBJECT (avsynth_video_filter, "Sending newsegment from %" G_GINT64_FORMAT
         " to %" G_GINT64_FORMAT, avsynth_video_filter->segment.start, stop);
-
+*/
     /* now replace the old segment so that we send it in the stream thread the
      * next time it is scheduled. */
     /*
@@ -1405,27 +1388,27 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
 
   /* and restart the task in case it got paused explicitely or by
    * the FLUSH_START event we pushed out. */
-  //GST_DEBUG_OBJECT (avsynth_video_filter, "Locking impl_mutex");
-  //g_mutex_lock (avsynth_video_filter->impl_mutex);
   if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) == GST_TASK_STOPPED) && avsynth_video_filter->impl))
   {
     GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
     gst_task_start (avsynth_video_filter->framegetter);
   }
-  //g_mutex_unlock (avsynth_video_filter->impl_mutex);
-  //GST_DEBUG_OBJECT (avsynth_video_filter, "Unlocked impl_mutex");
 
   /* and release the lock again so we can continue streaming */
   GST_PAD_STREAM_UNLOCK (avsynth_video_filter->srcpad);
 
+  /* Tell all sinks that downstream pipeline just made a seek and that
+   * out-of-cache-range frame requests should not cause the cache to grow, but
+   * should cause upstream seek instead.
+   */
   for (guint i = 0; i < avsynth_video_filter->sinks->len; i++)
   {
     AVSynthSink *sink = NULL;
     sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
     GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
     g_mutex_lock (sink->sinkmutex);
-    sink->eos = FALSE;
     sink->seek = TRUE;
+    sink->seekhint = seeksegment.time + sink->maxframeshift;
     g_mutex_unlock (sink->sinkmutex);
     GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
   }
@@ -1538,9 +1521,6 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
 {
   GstAVSynthVideoFilter *avsynth_video_filter;
   GstAVSynthVideoFilterClass *oclass;
-//  GstStructure *structure;
-//  const GValue *par;
-//  const GValue *fps;
   gboolean ret = TRUE;
   VideoInfo *vi;
   AVSynthSink *sink = NULL;
@@ -1614,12 +1594,13 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
       /* TODO: Collect EOS event. If we are waiting for data from the pad,
        * stop doing so.
        * Wait until we run out of data and send EOS downstream. We don't
-       * need to wait for EOS on all streams (if one stream has ended, while
+       * need to wait for EOS on all streams (if one stream have ended, while
        * others did not, we can't proceed anyways.
        */
       GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
       g_mutex_lock (sink->sinkmutex);
       sink->eos = TRUE;
+      sink->starving = FALSE;
       /* If that pad is waiting for data, wake it up, since there will be
        * no data to wait for.
        */
@@ -1648,6 +1629,7 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
         sink->cache->Clear();
       /* FIXME: init segment */
       sink->eos = FALSE;
+      sink->starving = FALSE;
       sink->flush = FALSE;
       g_mutex_unlock (sink->sinkmutex);
       GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
@@ -1803,19 +1785,15 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
     delete [] arguments;
   }
 
-  //GST_DEBUG_OBJECT (avsynth_video_filter, "Locking impl_mutex");
-  //g_mutex_lock (avsynth_video_filter->impl_mutex);
   if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) == GST_TASK_STOPPED) && avsynth_video_filter->impl))
   {
     GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
     gst_task_start (avsynth_video_filter->framegetter);
   }
-  //g_mutex_unlock (avsynth_video_filter->impl_mutex);
-  //GST_DEBUG_OBJECT (avsynth_video_filter, "Unlocked impl_mutex");
   
   GST_OBJECT_UNLOCK (avsynth_video_filter);
 
-  GST_DEBUG_OBJECT (pad, "Calling AddFrame()...");
+  GST_DEBUG_OBJECT (pad, "Calling AddBuffer()...");
 
   sink = (AVSynthSink *) g_object_get_data (G_OBJECT (pad), "sinkstruct");
   sink->cache->AddBuffer (pad, inbuf, avsynth_video_filter->env);
@@ -1824,7 +1802,7 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
 
   gst_buffer_unref (inbuf);
 
-  GST_DEBUG_OBJECT (pad, "Finished AddFrame()");
+  GST_DEBUG_OBJECT (pad, "Finished AddBuffer()");
 
   return ret;
 }

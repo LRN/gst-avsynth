@@ -57,8 +57,6 @@ private:
    */
   VideoInfo vi;
 
-//  GMutex *vcache_mutex;
-
   GCond *vcache_block_cond;
 
   /* A pad to which this cache is attached to */
@@ -93,8 +91,6 @@ public:
       delete (PVideoFrame *) g_ptr_array_index (bufs, i);
     g_ptr_array_free (bufs, TRUE);
     g_object_unref (pad);
-//    g_mutex_unlock (vcache_mutex);
-//    g_mutex_free (vcache_mutex);
     g_cond_free (vcache_cond);
     g_cond_free (vcache_block_cond);
   }

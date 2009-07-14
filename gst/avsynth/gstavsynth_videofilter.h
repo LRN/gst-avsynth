@@ -65,11 +65,17 @@ struct AVSynthSink
   /* TRUE if we've got EOS on this pad (set to FALSE on newsegment) */
   gboolean eos;
 
+  /* TRUE if we've got EOS and cache is empied too */
+  gboolean starving;
+
   /* TRUE if we're flushing */
   gboolean flush;
 
   /* TRUE if we've got a seek event from downstream */
   gboolean seek;
+
+  /* If seek is TRUE, seek to this frame or earlier */
+  gint64 seekhint;
 
   GMutex *sinkmutex;
 

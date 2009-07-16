@@ -415,7 +415,7 @@ ScriptEnvironment::NewPlanarVideoFrame(int width, int height, int align, bool U_
     Voffset = offset + pitch * height;
     Uoffset = offset + pitch * height + UVpitch * (height>>1);
   }
-  return new VideoFrame(vfb, offset, pitch, width, height, Uoffset, Voffset, UVpitch);
+  return new ImplVideoFrame(vfb, offset, pitch, width, height, Uoffset, Voffset, UVpitch);
 }
 
 bool

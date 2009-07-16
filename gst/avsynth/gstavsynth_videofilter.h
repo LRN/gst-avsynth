@@ -85,14 +85,17 @@ struct AVSynthSink
   /* Is set to TRUE by framegetter before each call to GetFrame() */
   gboolean firstcall;
 
-  /* After GetFrame() returns, these will contain the lowest frame intices that
-   * were requested since firstcall was TRUE.
+  /* After GetFrame() returns, these will contain the lowest and highest
+   * frame intices that were requested since firstcall was TRUE.
    */
   gint64 minframe;
+  gint64 maxframe;
   
   /* Add this to current frame index to get the index of earliest frame
    * required to produce current frame. Updated by framegetter.
    */
+  gint64 minframeshift;
+
   gint64 maxframeshift;
 };
 

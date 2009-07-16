@@ -536,7 +536,8 @@ gst_avsynth_video_filter_framegetter (void *data)
     /* Store it, we'll need it later */
     framenum = avsynth_video_filter->segment.time;
 
-    vf = avsynth_video_filter->impl->GetFrame(framenum, avsynth_video_filter->env);
+    vf = avsynth_video_filter->impl->GetFrame(framenum,
+        avsynth_video_filter->env);
 
     GST_DEBUG_OBJECT (avsynth_video_filter, "GetFrame() returned");
 
@@ -559,12 +560,17 @@ gst_avsynth_video_filter_framegetter (void *data)
       AVSynthSink *sink = NULL;
       GST_DEBUG_OBJECT (avsynth_video_filter, "Obtaining cache #%d", i);
       sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Calling ClearUntouched() for cache #%d", i);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Calling ClearUntouched() for "
+          "cache #%d", i);
       sink->cache->ClearUntouched();
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Returned from ClearUntouched() for cache #%d", i);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Returned from ClearUntouched() "
+          "for cache #%d", i);
       g_mutex_lock (sink->sinkmutex);
       sink->firstcall = TRUE;
-      sink->maxframeshift = sink->maxframeshift < sink->minframe - framenum ? sink->minframe - framenum : sink->maxframeshift;
+      sink->minframeshift = sink->minframeshift < sink->minframe - framenum ?
+          sink->minframe - framenum : sink->minframeshift;
+      sink->maxframeshift = sink->maxframeshift < sink->maxframe - framenum ?
+          sink->maxframe - framenum : sink->maxframeshift;
       eos |= sink->starving;
       g_mutex_unlock (sink->sinkmutex);
     }
@@ -573,7 +579,8 @@ gst_avsynth_video_filter_framegetter (void *data)
     g_mutex_lock (avsynth_video_filter->stop_mutex);
     while (!(stop = avsynth_video_filter->stop) && avsynth_video_filter->pause)
     {
-      g_cond_wait (avsynth_video_filter->pause_cond, avsynth_video_filter->stop_mutex);
+      g_cond_wait (avsynth_video_filter->pause_cond,
+          avsynth_video_filter->stop_mutex);
     }
     g_mutex_unlock (avsynth_video_filter->stop_mutex);
  
@@ -592,11 +599,13 @@ gst_avsynth_video_filter_framegetter (void *data)
       if ((stop = avsynth_video_filter->segment.stop) == -1)
         stop = avsynth_video_filter->segment.duration;
   
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Sending newsegment from %" G_GINT64_FORMAT
-          " to %" G_GINT64_FORMAT, avsynth_video_filter->segment.start, stop);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Sending newsegment from %"
+         G_GINT64_FORMAT " to %" G_GINT64_FORMAT,
+         avsynth_video_filter->segment.start, stop);
   
-      /* now replace the old segment so that we send it in the stream thread the
-       * next time it is scheduled. */
+      /* now replace the old segment so that we send it in the stream thread
+       * the next time it is scheduled.
+       */
       if (avsynth_video_filter->segment.rate >= 0.0) {
         /* forward, we send data from last_stop to stop */
         newsegevent =
@@ -656,17 +665,16 @@ gst_avsynth_video_filter_framegetter (void *data)
     }
     g_mutex_unlock (avsynth_video_filter->stop_mutex);
 
-    if (G_UNLIKELY (!push))
+    if (G_UNLIKELY (!push || eos))
     {
       gst_buffer_unref (outbuf);
       continue;
     }
-    /* FIXME: don't push if we're starving (last frame is incorrect anyway)? */
     GST_DEBUG_OBJECT (avsynth_video_filter, "Pushing frame %" G_GUINT64_FORMAT" downstream, clip_start = %" G_GINT64_FORMAT, GST_BUFFER_OFFSET (outbuf), clip_start);
     gst_pad_push (avsynth_video_filter->srcpad, outbuf);
 
-    /* For debuggnig */
-    if (clip_start == 100 || clip_start == 400 || clip_start == 700)
+    /* For debuggnig *//*
+    if (clip_start == 100 || clip_start == 400 || clip_start == 700 || clip_start == 1000)
     {
       GstElement *pipeline;
       GstStructure *s;
@@ -695,7 +703,7 @@ gst_avsynth_video_filter_framegetter (void *data)
             "stop_type", G_TYPE_INT, (gint) GST_SEEK_TYPE_NONE,
             "stop", G_TYPE_INT64, (gint64) -1,
             NULL);
-      else if (clip_start == 700)
+      else 
         s = gst_structure_new ("GstAVSynthSeek",
             "rate", G_TYPE_DOUBLE, (gdouble) 1.0,
             "format", G_TYPE_INT, (gint) GST_FORMAT_DEFAULT,
@@ -705,6 +713,19 @@ gst_avsynth_video_filter_framegetter (void *data)
             "stop_type", G_TYPE_INT, (gint) GST_SEEK_TYPE_NONE,
             "stop", G_TYPE_INT64, (gint64) -1,
             NULL);
+      if (clip_start == 1000)
+      {
+        for (guint i = 0; i < avsynth_video_filter->sinks->len; i++)
+        {
+          AVSynthSink *sink = NULL;
+          sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
+          g_mutex_lock (sink->sinkmutex);
+          sink->seekhint = 31326;
+          sink->seek = TRUE;
+          g_mutex_unlock (sink->sinkmutex);
+        }
+        avsynth_video_filter->segment.time = 31326;
+      }
     
       m = gst_message_new_custom (GST_MESSAGE_ELEMENT, GST_OBJECT (avsynth_video_filter), s);
     
@@ -715,15 +736,33 @@ gst_avsynth_video_filter_framegetter (void *data)
       gst_object_unref (pipeline);
       gst_object_unref (b);
     }
-
-    if (eos)
-    {
-      GstEvent *eos_event;
-      eos_event = gst_event_new_eos ();
-      gst_pad_push_event (avsynth_video_filter->srcpad, eos_event);
-    }
+    */
+    g_mutex_lock (avsynth_video_filter->impl_mutex);
+    if (avsynth_video_filter->vi.num_frames >= 0)
+      eos = avsynth_video_filter->segment.time > avsynth_video_filter->vi.num_frames - 1;
+    g_mutex_unlock (avsynth_video_filter->impl_mutex);
   }
 
+  if (eos)
+  {
+    GstEvent *eos_event;
+
+    for (guint i = 0; i < avsynth_video_filter->sinks->len; i++)
+    {
+      AVSynthSink *sink = NULL;
+      sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
+      g_mutex_lock (sink->sinkmutex);
+      if (!sink->eos)
+        GST_INFO_OBJECT (avsynth_video_filter, "Reached the last frame, but "
+            "eos is not set on sink %d", i);
+      g_mutex_unlock (sink->sinkmutex);
+    }
+
+    eos_event = gst_event_new_eos ();
+    gst_pad_push_event (avsynth_video_filter->srcpad, eos_event);
+  }
+
+  gst_task_pause (avsynth_video_filter->framegetter);
   GST_DEBUG_OBJECT (avsynth_video_filter, "Stopped: stop = %d, eos = %d", (gint) stop, (gint) eos);
   gst_object_unref (avsynth_video_filter);
 }
@@ -1409,7 +1448,7 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
     GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
     g_mutex_lock (sink->sinkmutex);
     sink->seek = TRUE;
-    sink->seekhint = seeksegment.time + sink->maxframeshift;
+    sink->seekhint = seeksegment.time + sink->minframeshift;
     GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Set sink seek hint to %" G_GUINT64_FORMAT, (gpointer) sink->cache, sink->seekhint);
     g_mutex_unlock (sink->sinkmutex);
     GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);

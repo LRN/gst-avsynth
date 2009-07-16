@@ -263,19 +263,30 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
   {
     sink->firstcall = FALSE;
     sink->minframe = in_n;
+    sink->maxframe = in_n;
   }
-  else if (in_n < sink->minframe)
-    sink->minframe = in_n;
+  else
+  {
+    if (in_n < sink->minframe)
+      sink->minframe = in_n;
+    if (in_n > sink->maxframe)
+      sink->maxframe = in_n;
+  }
 
   /* Make sure 0 >= n < num_frames, but only if duration is known */
   if (vi.num_frames >= 0)
-    n = MIN (vi.num_frames, MAX (0, in_n));
+  {
+    n = MIN (vi.num_frames - 1, MAX (0, in_n));
+    if (in_n > vi.num_frames - 1)
+      GST_WARNING ("Video cache %p: frame index %d exceedes max frame index %d",
+          (gpointer) this, in_n, vi.num_frames - 1);
+  }
   else
     n = in_n;
 
   GST_DEBUG ("Video cache %p: frame %" G_GUINT64_FORMAT
-      " is requested. Cache range=%" G_GUINT64_FORMAT "+ %" G_GUINT64_FORMAT
-      ", size=%" G_GUINT64_FORMAT, (gpointer) this, n, rng_from, used_size,
+      " of %d is requested. Cache range=%" G_GUINT64_FORMAT "+ %" G_GUINT64_FORMAT
+      ", size=%" G_GUINT64_FORMAT, (gpointer) this, n, vi.num_frames, rng_from, used_size,
       size);
 
   /* Filter asked for a frame we haven't reached yet */
@@ -345,7 +356,8 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
     size = 0;
     
     /* AddBuffer will discard all frames with number less than rng_from */
-    rng_from = sink->seekhint < n ? sink->seekhint : n;
+    sink->seekhint = sink->seekhint < n ? sink->seekhint : n;
+    rng_from = sink->seekhint;
     /* Tells AddBuffer that rng_from is set and we are seeking, have to use
      * this since sink->seek could be TRUE before we have a chance to update
      * rng_from.
@@ -379,7 +391,7 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
     g_mutex_lock (sink->sinkmutex);
     GST_DEBUG ("Video cache %p: waiting for frame %" G_GUINT64_FORMAT, (gpointer) this, rng_from);
     sink->seek = FALSE;
-    while ((size == 0 || rng_from + size < n + 1) && !sink->eos)
+    while ((size == 0 || rng_from + size < sink->seekhint + 1) && !sink->eos)
     {
       GST_DEBUG ("Video cache %p: waiting at stream lock %p", (gpointer) this, GST_PAD_GET_STREAM_LOCK (pad));
       g_cond_wait (vcache_cond, sink->sinkmutex);
@@ -393,13 +405,22 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
     ivf = (ImplVideoFrameBuffer *) (*ret)->GetFrameBuffer();
     GST_DEBUG ("Video cache %p: touching and returning frame %" G_GUINT64_FORMAT ", its calculated index is %" G_GUINT64_FORMAT", self index is %" G_GUINT64_FORMAT", %p (%p)", (gpointer) this, n, store_rng + (n - rng_from), ivf->selfindex, ivf, ret);
     if (n != ivf->selfindex)
-      GST_ERROR ("Returning wrong frame");
+      GST_ERROR ("Video cache %p: returning wrong frame: %" G_GUINT64_FORMAT" != %" G_GUINT64_FORMAT, (gpointer) this, n, ivf->selfindex);
     ivf->touched = TRUE;
   }
   else
   {
-    ret = new PVideoFrame();
-    GST_WARNING ("Returning empty frame, rng_from = %" G_GINT64_FORMAT", size = %" G_GINT64_FORMAT", n = %"G_GINT64_FORMAT, rng_from, size, n);
+    if (size == 0)
+    {
+      ret = new PVideoFrame();
+      GST_WARNING ("Returning empty frame, rng_from = %" G_GINT64_FORMAT", size = %" G_GINT64_FORMAT", n = %"G_GINT64_FORMAT, rng_from, size, n);
+    } else {
+      ret = (PVideoFrame *) g_ptr_array_index (bufs, size - 1);
+      ivf = (ImplVideoFrameBuffer *) (*ret)->GetFrameBuffer();
+      ivf->touched = TRUE;
+      GST_WARNING ("Returning frame %" G_GINT64_FORMAT " instead of %" G_GINT64_FORMAT", rng_from = %" G_GINT64_FORMAT", size = %" G_GINT64_FORMAT, rng_from + size - 1, n, rng_from, size);
+    }
+     
     if (sink->eos)
       sink->starving = TRUE;
   }

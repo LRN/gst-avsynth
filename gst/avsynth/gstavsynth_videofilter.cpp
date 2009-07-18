@@ -522,10 +522,23 @@ gst_avsynth_video_filter_framegetter (void *data)
   avsynth_video_filter = (GstAVSynthVideoFilter *) data;
   gst_object_ref (avsynth_video_filter);
 
+  eos = avsynth_video_filter->eos;
+  
   while (!stop && !eos)
   {
     PVideoFrame vf = NULL;
     GstBuffer *outbuf;
+
+    for (guint i = 0; i < avsynth_video_filter->sinks->len; i++)
+    {
+      AVSynthSink *sink = NULL;
+      sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
+      g_mutex_lock (sink->sinkmutex);
+      eos |= sink->starving;
+      g_mutex_unlock (sink->sinkmutex);
+    }
+    if (G_UNLIKELY (eos))
+      break;
 
     GST_DEBUG_OBJECT (avsynth_video_filter, "Calling GetFrame()");
 
@@ -743,7 +756,7 @@ gst_avsynth_video_filter_framegetter (void *data)
     g_mutex_unlock (avsynth_video_filter->impl_mutex);
   }
 
-  if (eos)
+  if (eos && !avsynth_video_filter->eos)
   {
     GstEvent *eos_event;
 
@@ -760,6 +773,8 @@ gst_avsynth_video_filter_framegetter (void *data)
 
     eos_event = gst_event_new_eos ();
     gst_pad_push_event (avsynth_video_filter->srcpad, eos_event);
+
+    avsynth_video_filter->eos = TRUE;
   }
 
   gst_task_pause (avsynth_video_filter->framegetter);
@@ -865,6 +880,8 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
   avsynth_video_filter->uninitialized = TRUE;
 
   avsynth_video_filter->segment.time = 0;
+
+  avsynth_video_filter->eos = FALSE;
 }
 
 void
@@ -1641,7 +1658,6 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
       GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
       g_mutex_lock (sink->sinkmutex);
       sink->eos = TRUE;
-      sink->starving = FALSE;
       /* If that pad is waiting for data, wake it up, since there will be
        * no data to wait for.
        */
@@ -1711,8 +1727,12 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
 
       gst_segment_set_newsegment_full (&sink->segment, update,
           rate, arate, fmt, start, stop, time);
+      sink->eos = FALSE;
+      sink->starving = FALSE;
       g_mutex_unlock (sink->sinkmutex);
       GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
+      /* If EOS conditions are still true, next framegetter run will set eos back */
+      avsynth_video_filter->eos = FALSE;
       ret = TRUE;
       break;
     }
@@ -1751,6 +1771,14 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
       GST_TIME_ARGS (in_timestamp), GST_TIME_ARGS (in_duration));
 
   GST_OBJECT_LOCK (avsynth_video_filter);
+
+  if (avsynth_video_filter->eos)
+  {
+    gst_object_unref (avsynth_video_filter);
+    GST_OBJECT_UNLOCK (avsynth_video_filter);
+
+    return GST_FLOW_UNEXPECTED;
+  }
 
   if (G_UNLIKELY (avsynth_video_filter->uninitialized))
   {
@@ -1826,7 +1854,7 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
     delete [] arguments;
   }
 
-  if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) == GST_TASK_STOPPED) && avsynth_video_filter->impl))
+  if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) != GST_TASK_STARTED) && avsynth_video_filter->impl))
   {
     GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
     gst_task_start (avsynth_video_filter->framegetter);

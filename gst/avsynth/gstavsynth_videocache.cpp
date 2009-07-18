@@ -278,8 +278,11 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
   {
     n = MIN (vi.num_frames - 1, MAX (0, in_n));
     if (in_n > vi.num_frames - 1)
+    {
       GST_WARNING ("Video cache %p: frame index %d exceedes max frame index %d",
           (gpointer) this, in_n, vi.num_frames - 1);
+      sink->starving = TRUE;
+    }
   }
   else
     n = in_n;

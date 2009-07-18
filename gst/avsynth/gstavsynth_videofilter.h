@@ -148,6 +148,11 @@ struct _GstAVSynthVideoFilter
 
   /* VideoInfo of the last output buffer */
   VideoInfo vi;
+
+  /* TRUE when framegetter can't produce any more frames
+   * (usually - because one of the source frames has reached eos)
+   */
+  gboolean eos;
 };
 
 struct AVSynthVideoFilterParam

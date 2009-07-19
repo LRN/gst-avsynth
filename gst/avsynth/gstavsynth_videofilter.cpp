@@ -379,7 +379,7 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
 
 
 GstBuffer *
-gst_avsynth_ivf_to_buf (PVideoFrame &pvf, VideoInfo vi)
+gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoInfo vi)
 {
   ImplVideoFrameBuffer *ivf;
   GstBuffer *ret = NULL;
@@ -388,8 +388,9 @@ gst_avsynth_ivf_to_buf (PVideoFrame &pvf, VideoInfo vi)
   //VideoInfo vi = NULL;
   gint64 data_size;
   gint offset;
-
-  offset = pvf->GetOffset();
+  gint stride;
+  gint pitch;
+  gint comp_offset;
 
   ivf = (ImplVideoFrameBuffer *) pvf->GetFrameBuffer();
 
@@ -424,24 +425,14 @@ gst_avsynth_ivf_to_buf (PVideoFrame &pvf, VideoInfo vi)
   }
 
   if (vi.IsFieldBased())
-  {
     caps = gst_video_format_new_caps_interlaced (vf, vi.width, vi.height, vi.fps_numerator, vi.fps_denominator,  1, 1, TRUE);
-    if (vi.IsParityKnown())
-    {
-      if (vi.IsTFF())
-        GST_BUFFER_FLAG_SET (ret, GST_VIDEO_BUFFER_TFF);
-      else
-        GST_BUFFER_FLAG_UNSET (ret, GST_VIDEO_BUFFER_TFF);
-    }
-  }
   else
     caps = gst_video_format_new_caps_interlaced (vf, vi.width, vi.height, vi.fps_numerator, vi.fps_denominator,  1, 1, FALSE);
 
-  /* I'm assuming that downstream elements are smart enough to process aligned
-   * buffer properly, so i am going to keep filter-specific alignment
-   */
-
-  ret = gst_buffer_try_new_and_alloc (data_size);
+  if (data_size != gst_video_format_get_size (vf, vi.width, vi.height))
+    ret = gst_buffer_try_new_and_alloc (gst_video_format_get_size (vf, vi.width, vi.height));
+  else
+    ret = gst_buffer_try_new_and_alloc (data_size);
 
   if (!ret)
   {
@@ -451,9 +442,44 @@ gst_avsynth_ivf_to_buf (PVideoFrame &pvf, VideoInfo vi)
   }
 
   gst_buffer_set_caps (ret, caps);
+
+  if (vi.IsParityKnown())
+  {
+    if (vi.IsTFF())
+      GST_BUFFER_FLAG_SET (ret, GST_VIDEO_BUFFER_TFF);
+    else
+      GST_BUFFER_FLAG_UNSET (ret, GST_VIDEO_BUFFER_TFF);
+  }
+
   gst_caps_unref (caps);
 
-  g_memmove (GST_BUFFER_DATA (ret), ivf->GetReadPtr() + offset, data_size - offset);
+  comp_offset = gst_video_format_get_component_offset (vf, 0, vi.width, vi.height);
+  offset = pvf->GetOffset(0);
+  stride = gst_video_format_get_row_stride (vf, 0, vi.width);
+  pitch = pvf->GetPitch(0);
+
+  filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride,
+      ivf->GetReadPtr() + offset, pitch, pvf->GetRowSize(0), vi.height);
+  if (!(gst_video_format_get_component_offset (vf, 0, vi.width, vi.height) + 
+        gst_video_format_get_component_offset (vf, 1, vi.width, vi.height) +
+        gst_video_format_get_component_offset (vf, 2, vi.width, vi.height) +
+        gst_video_format_get_component_offset (vf, 3, vi.width, vi.height) <=
+        gst_video_format_get_component_width (vf, 0, vi.width)))
+  {
+    comp_offset = gst_video_format_get_component_offset (vf, 1, vi.width, vi.height);
+    offset = pvf->GetOffset(1);
+    stride = gst_video_format_get_row_stride (vf, 1, vi.height);
+    pitch = pvf->GetPitch(1);
+    
+    filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride, ivf->GetReadPtr() + offset, pitch, pvf->GetRowSize(1), vi.height);
+
+    comp_offset = gst_video_format_get_component_offset (vf, 2, vi.width, vi.height);
+    offset = pvf->GetOffset(2);
+    stride = gst_video_format_get_row_stride (vf, 2, vi.height);
+    pitch = pvf->GetPitch(2);
+    
+    filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride, ivf->GetReadPtr() + offset, pitch, pvf->GetRowSize(2), vi.height);
+  }
 
   return ret;
 }
@@ -557,7 +583,7 @@ gst_avsynth_video_filter_framegetter (void *data)
     /* Update last videoinfo */
     avsynth_video_filter->vi = avsynth_video_filter->impl->GetVideoInfo();
 
-    outbuf = gst_avsynth_ivf_to_buf (vf, avsynth_video_filter->vi);
+    outbuf = gst_avsynth_ivf_to_buf (avsynth_video_filter, vf, avsynth_video_filter->vi);
 
     GST_BUFFER_OFFSET (outbuf) = avsynth_video_filter->segment.time++;
 
@@ -976,6 +1002,11 @@ gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
               GST_FORMAT_PERCENT_MAX);
           res = TRUE;
           break;
+        case GST_FORMAT_DEFAULT:
+          gst_query_set_duration (query, GST_FORMAT_DEFAULT,
+              avsynth_video_filter->vi.num_frames);
+          res = TRUE;
+          break;
         default:
         {
           gint64 duration;
@@ -1010,9 +1041,8 @@ gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
       gint64 src_val, dest_val;
 
       gst_query_parse_convert (query, &src_fmt, &src_val, &dest_fmt, &dest_val);
-      if (res =
-              gst_avsynth_video_filter_src_convert (pad, src_fmt, src_val, &dest_fmt,
-                  &dest_val))
+      if ((res = gst_avsynth_video_filter_src_convert (pad, src_fmt, src_val,
+              &dest_fmt, &dest_val)))
         gst_query_set_convert (query, src_fmt, src_val, dest_fmt, dest_val);
     }
     default:

@@ -159,7 +159,7 @@ PVideoFrame __stdcall SimpleSample::GetFrame(int n, IScriptEnvironment* env) {
     // 3 bytes, Blue, Green and Red.
     // Although this colourspace is the easiest to understand, it is very rarely used because
     // a 3 byte sequence (24bits) cannot be processed easily using normal 32 bit registers.
-    
+/*    
     for (h=0; h < src_height;h++) {       // Loop from bottom line to top line.
       for (w = 0; w < src_width; w+=3) {   // Loop from left side of the image to the right side 1 pixel (3 bytes) at a time
         // stepping 3 bytes (a pixel width in RGB24 space)
@@ -168,15 +168,15 @@ PVideoFrame __stdcall SimpleSample::GetFrame(int n, IScriptEnvironment* env) {
         *(dstp + w + 1) = *(srcp + w + 1);     // Copy Green.
         *(dstp + w + 2) = *(srcp + w + 2);    // Copy Red
       }                              
-      
       srcp = srcp + src_pitch; // Add the pitch (note use of pitch and not width) of one line (in bytes) to the source pointer
       dstp = dstp + dst_pitch; // Add the pitch to the destination pointer.
     }
+*/
+    env->BitBlt(dst->GetWritePtr(), dst->GetPitch(), src->GetReadPtr(), src->GetPitch(), src->GetRowSize(), src->GetHeight());
     // end copy src to dst
     
     //Now draw a white square in the middle of the frame
     // Normally you'd do this code within the loop above but here it is in a separate loop for clarity;
-    
     dstp = dst->GetWritePtr();  // reset the destination pointer to the bottom, left pixel. (RGB colourspaces only)
     dstp = dstp + (dst_height/2 - SquareSize/2)*dst_pitch;  // move pointer to SquareSize/2 lines from the middle of the frame;
     for (h=0; h < SquareSize;h++) { // only scan 100 lines 
@@ -198,14 +198,7 @@ PVideoFrame __stdcall SimpleSample::GetFrame(int n, IScriptEnvironment* env) {
     // quicker than RGB24 as you can deal with whole 32bit variables at a time
     // and easily work directly and quickly in assembler (if you know how to that is :-)
     
-    for (h=0; h < src_height;h++) {       // Loop from bottom line to top line.
-      for (w = 0; w < src_width/4; w+=1) {  // and from leftmost pixel to rightmost one. 
-        *((unsigned int *)dstp + w) = *((unsigned int *)srcp + w);  // Copy each whole pixel from source to destination.
-      }                                          // by temporarily treating the src and dst pointers as
-                                                // pixel pointers intead of byte pointers
-      srcp = srcp + src_pitch; // Add the pitch (note use of pitch and not width) of one line (in bytes) to the source pointer
-      dstp = dstp + dst_pitch; // Add the pitch to the destination pointer.
-    }
+    env->BitBlt(dst->GetWritePtr(), dst->GetPitch(), src->GetReadPtr(), src->GetPitch(), src->GetRowSize(), src->GetHeight());
     // end copy src to dst
     
     //Now draw a white square in the middle of the frame
@@ -237,32 +230,18 @@ PVideoFrame __stdcall SimpleSample::GetFrame(int n, IScriptEnvironment* env) {
     // 1) YUY2 frame_width is half of an RGB32 one
     // 2) But in YUY2 colourspace, a 32bit variable holds 2 pixels instead of the 1 in RGB32 colourspace.
 
-    for (h=0; h < src_height;h++) {       // Loop from top line to bottom line (opposite of RGB colourspace).
-      for (w = 0; w < src_width/4; w+=1) {  // and from leftmost double-pixel to rightmost one. 
-        *((unsigned int *)dstp + w) = *((unsigned int *)srcp + w);  // Copy 2 pixels worth of information from source to destination.
-      }                                          // at a time by temporarily treating the src and dst pointers as
-                                                // 32bit (4 byte) pointers intead of 8 bit (1 byte) pointers
-      srcp = srcp + src_pitch; // Add the pitch (note use of pitch and not width) of one line (in bytes) to the source pointer
-      dstp = dstp + dst_pitch; // Add the pitch to the destination pointer.
-    }
+    env->BitBlt(dst->GetWritePtr(), dst_pitch, src->GetReadPtr(), src_pitch, src_width, src_height);
     // end copy src to dst
     
     //Now draw the other clip inside a square in the middle of the frame
     // Normally you'd do this code within the loop above but here it is in a separate loop for clarity;
   
     dstp = dst->GetWritePtr();  // reset the destination pointer to the top, left pixel. (YUY2 colourspace only)
-    dstp = dstp + (dst_height/2 - SquareSize/2)*dst_pitch;  // move pointer to SquareSize/2 lines from the middle of the frame;
+    dstp = dstp + (dst_height/2 - SquareSize/2)*dst_pitch + dst_width/2 - SquareSize;  // move pointer to SquareSize/2 lines from the middle of the frame;
 
     windowp = window->GetReadPtr();
 
-    int woffset = dst_width/8 - SquareSize/4;  // lets precalulate the width offset like we do for the lines.
-    for (h=0; h < SquareSize;h++) { // only scan SquareSize number of lines 
-      for (w = 0; w < SquareSize/2; w+=1) { // only scans the middle SquareSize pixels of a line 
-        *((unsigned int *)dstp + woffset + w) = *((unsigned int *)windowp + w);  // Pixels to come from top left of WindowVideo
-      }                                      
-      dstp = dstp + dst_pitch; 
-      windowp = windowp + window_pitch;
-    }
+    env->BitBlt(dstp, dst_pitch, windowp, window_pitch, SquareSize*2, SquareSize);
   }
 
   if (vi.IsYV12()) {

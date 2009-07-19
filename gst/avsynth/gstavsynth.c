@@ -46,6 +46,10 @@
 
 #include <gst/gst.h>
 
+#if HAVE_ORC
+#include <orc/orcprogram.h>
+#endif
+
 #include "gstavsynth.h"
 
 GST_DEBUG_CATEGORY (gst_avsynth_debug);
@@ -109,6 +113,10 @@ avsynth_init (GstPlugin * avsynth)
   GST_LOG("gst_avsynth_video_filter_register result is %d", result);
 
   g_free (plugindirs);
+
+#if HAVE_ORC
+  orc_init ();
+#endif
 
   return TRUE;
 }

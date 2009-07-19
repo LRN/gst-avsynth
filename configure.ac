@@ -129,11 +129,20 @@ AC_CHECK_FUNC(gethostbyname,,[AC_CHECK_LIB(nsl,gethostbyname)])
 dnl GLib is required
 AG_GST_GLIB_CHECK([2.6])
 
-dnl liboil is required
-PKG_CHECK_MODULES(LIBOIL, liboil-0.3 >= 0.3.8, HAVE_LIBOIL=yes, HAVE_LIBOIL=no)
-if test "x$HAVE_LIBOIL" != "xyes"; then
-  AC_ERROR([liboil-0.3.8 or later is required])
+dnl Orc is optional
+AC_ARG_ENABLE(orc, AC_HELP_STRING([--enable-orc],
+              [enable orc support (default=disabled)]))
+if test "x$enable_orc" = xyes
+then
+  ORC_VER="0.4.0"
+  PKG_CHECK_MODULES(ORC, orc-0.4 >= $ORC_VER, HAVE_ORC=yes, HAVE_ORC=no)
+else
+  HAVE_ORC=no
 fi
+if test "x${HAVE_ORC}" = xyes ; then
+  AC_DEFINE(HAVE_ORC, 1, [Whether or not orc is enabled])
+fi
+AM_CONDITIONAL(HAVE_ORC, test "x$HAVE_ORC" = "xyes")
 
 dnl checks for gstreamer
 dnl uninstalled is selected preferentially -- see pkg-config(1)
@@ -273,6 +282,9 @@ filters/Makefile
 filters/testfilter/Makefile
 common/Makefile
 common/m4/Makefile
+tests/Makefile
+tests/examples/Makefile
+tests/examples/frameseek/Makefile
 m4/Makefile
 )
 AC_OUTPUT

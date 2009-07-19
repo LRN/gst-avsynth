@@ -40,6 +40,11 @@
 #include "gstavsynth_videofilter.h"
 #include "gstavsynth_loader.h"
 #include "gstavsynth_scriptenvironment.h"
+#if HAVE_ORC
+G_BEGIN_DECLS
+#include <orc/orcprogram.h>
+G_END_DECLS
+#endif
 
 ImplVideoFrameBuffer::ImplVideoFrameBuffer(): VideoFrameBuffer()
 {
@@ -449,11 +454,65 @@ ScriptEnvironment::MakeWritable(PVideoFrame* pvf) {
 
 
 void BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height) {
+//  GST_WARNING ("BitBlt %p ++ %d -> %p ++ %d == %d | %d", dstp, dst_pitch, srcp, src_pitch, row_size, height);
   if ((!height) || (!row_size)) return;
-  /* FIXME: Find faster LGPL implementation */
   if (height == 1 || (dst_pitch == src_pitch && src_pitch == row_size)){
     memcpy(dstp, srcp, row_size * height);
   } else {
+#if HAVE_ORC
+    static OrcProgram *p = NULL;
+    OrcExecutor _ex;
+    OrcExecutor *ex = &_ex;
+
+    gint i = 0;
+    guint8 *dst_ptr, *src_ptr;
+    static gboolean dbg = FALSE;
+
+    dst_ptr = (guint8 *) dstp;
+    src_ptr = (guint8 *) srcp;
+
+    if (G_UNLIKELY (p == NULL))
+    {
+      int ret;
+  
+      p = orc_program_new_ds (1, 1);
+      orc_program_append_ds_str (p, "copyb", "d1", "s1");
+  
+      ret = orc_program_compile (p);
+      if (!ORC_COMPILE_RESULT_IS_SUCCESSFUL(ret)) {
+        GST_ERROR ("Orc compiler failure");
+        AvisynthError ("Failed to compile Orc version of BitBlt");
+      }
+    }
+    ex = orc_executor_new (p);
+    orc_executor_set_n (ex, row_size);
+    for (i = 0; i < height; i++)
+    {
+//      if (height == 2) GST_WARNING ("BitBlt'ing row %d", i);
+      orc_executor_set_array_str (ex, "s1", src_ptr);
+      orc_executor_set_array_str (ex, "d1", dst_ptr);
+      orc_executor_run (ex);
+      src_ptr += src_pitch;
+      dst_ptr += dst_pitch;
+    }
+    orc_executor_free (ex);
+
+    if (G_UNLIKELY (dbg))
+    {
+      gboolean ok = TRUE;
+      for (i = 0; i < height && ok; i++)
+      {
+        for (int j = 0; j < row_size && ok; j++)
+          ok = (dst_ptr[j] == src_ptr[j]);
+        src_ptr += src_pitch;
+        dst_ptr += dst_pitch;
+      }
+      if (!ok)
+      {
+        GST_ERROR ("BitBlt did something wrong");
+      }
+    }
+#else /* !HAVE_ORC */
     int y;
     for (y = height; y > 0; --y)
     {
@@ -461,6 +520,7 @@ void BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_
       dstp += dst_pitch;
       srcp += src_pitch;
     }
+#endif /* HAVE_ORC */
   }
 }
 

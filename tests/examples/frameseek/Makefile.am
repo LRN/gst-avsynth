@@ -1,0 +1,6 @@
+examples = frameseek
+
+noinst_PROGRAMS = frameseek
+
+LDADD = $(GTK_LIBS) -lgstvideo-@GST_MAJORMINOR@ $(GST_BASE_LIBS) $(GST_LIBS)
+AM_CFLAGS = $(GST_CFLAGS) $(GST_BASE_CFLAGS) $(GST_PLUGINS_BASE_CFLAGS) $(GTK_CFLAGS)

@@ -72,6 +72,62 @@ typedef int64_t __int64;
 #  define FALSE 0
 #endif
 
+/* Portability macros from wine (winehq.org) LGPL licensed */
+
+#if !defined(_MSC_VER) && !defined(__int64)
+# if defined(_WIN64) && !defined(__MINGW64__)
+#   define __int64 long
+# else
+#   define __int64 long long
+# endif
+#endif
+
+#ifndef __stdcall
+# ifdef __i386__
+#  ifdef __GNUC__
+#   ifdef __APPLE__ /* Mac OS X uses a 16-byte aligned stack and not a 4-byte one */
+#    define __stdcall __attribute__((__stdcall__)) __attribute__((__force_align_arg_pointer__))
+#   else
+#    define __stdcall __attribute__((__stdcall__))
+#   endif
+#  elif defined(_MSC_VER)
+    /* Nothing needs to be done. __stdcall already exists */
+#  else
+#   error You need to define __stdcall for your compiler
+#  endif
+# elif defined(__x86_64__) && defined (__GNUC__)
+#  define __stdcall __attribute__((ms_abi))
+# else
+#  define __stdcall
+# endif
+#endif /* __stdcall */
+
+#ifndef __cdecl
+# if defined(__i386__) && defined(__GNUC__)
+#  ifdef __APPLE__ /* Mac OS X uses 16-byte aligned stack and not a 4-byte one */
+#   define __cdecl __attribute__((__cdecl__)) __attribute__((__force_align_arg_pointer__))
+#  else
+#   define __cdecl __attribute__((__cdecl__))
+#  endif
+# elif defined(__x86_64__) && defined (__GNUC__)
+#  define __cdecl __attribute__((ms_abi))
+# elif !defined(_MSC_VER)
+#  define __cdecl
+# endif
+#endif /* __cdecl */
+
+#ifndef DECLSPEC_NORETURN
+# if defined(_MSC_VER) && (_MSC_VER >= 1200) && !defined(MIDL_PASS)
+#  define DECLSPEC_NORETURN __declspec(noreturn)
+# elif defined(__GNUC__)
+#  define DECLSPEC_NORETURN __attribute__((noreturn))
+# else
+#  define DECLSPEC_NORETURN
+# endif
+#endif
+
+/* End of Wine portability macros */
+
 // COM interface macros
 //#include <objbase.h>
 
@@ -754,7 +810,7 @@ public:
   // note: val is really a va_list; I hope everyone typedefs va_list to a pointer
   virtual char* __stdcall VSprintf(const char* fmt, void* val) = 0;
 
-  __declspec(noreturn) virtual void __stdcall ThrowError(const char* fmt, ...) = 0;
+  DECLSPEC_NORETURN virtual void __stdcall ThrowError(const char* fmt, ...) = 0;
 
   class NotFound /*exception*/ {};  // thrown by Invoke and GetVar
 

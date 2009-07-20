@@ -54,7 +54,7 @@ handoff (GstElement *fakesink, GstBuffer *buffer, GstPad *pad, gpointer user_dat
   size = gst_caps_get_size (caps);
 
   g_print ("Dumping frame %" G_GUINT64_FORMAT "\n", GST_BUFFER_OFFSET (buffer));
-
+/*
   filename = g_strdup_printf ("f:/dump/counter(%08" G_GINT64_FORMAT ")_frame(%08" G_GUINT64_FORMAT ").png", counter++, GST_BUFFER_OFFSET (buffer));
 
   if (size == 1)
@@ -81,17 +81,22 @@ handoff (GstElement *fakesink, GstBuffer *buffer, GstPad *pad, gpointer user_dat
       }
     }
   }
-  
-  gst_caps_unref (caps);
-
   g_free (filename);
-
+*/  
+  gst_caps_unref (caps);
   if (duration == 0)
   {
     if (gst_element_query_duration (fakesink, &fmt , &duration))
       gtk_range_set_range (GTK_RANGE (scale), 0, duration);
   }
-  gtk_range_set_value (GTK_RANGE (scale), GST_BUFFER_OFFSET (buffer));
+/*
+  {
+    gchar *newlabel = g_strdup_printf ("%" G_GUINT64_FORMAT, GST_BUFFER_OFFSET (buffer));
+    gtk_label_set_text (GTK_LABEL (elapsed), newlabel);
+    g_free (newlabel);
+  }
+*/
+  //gtk_range_set_value (GTK_RANGE (scale), GST_BUFFER_OFFSET (buffer));
 }
 
 static void
@@ -104,7 +109,7 @@ value_changed_callback (GtkWidget * widget, GstElement * fakesink)
   g_print ("Frame: %f\n", value);
   //g_object_set (, "volume", level, NULL);
   pos = value;
-  gst_element_seek_simple (fakesink, 1.0, GST_FORMAT_DEFAULT, pos);
+  gst_element_seek_simple (fakesink, GST_FORMAT_DEFAULT, GST_SEEK_FLAG_NONE, pos);
 }
 
 static void

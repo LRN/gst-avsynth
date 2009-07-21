@@ -807,8 +807,7 @@ public:
 
   virtual char* __stdcall SaveString(const char* s, int length = -1) = 0;
   virtual char* __stdcall Sprintf(const char* fmt, ...) = 0;
-  // note: val is really a va_list; I hope everyone typedefs va_list to a pointer
-  virtual char* __stdcall VSprintf(const char* fmt, void* val) = 0;
+  virtual char* __stdcall VSprintf(const char* fmt, va_list val) = 0;
 
   DECLSPEC_NORETURN virtual void __stdcall ThrowError(const char* fmt, ...) = 0;
 

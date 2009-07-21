@@ -50,7 +50,7 @@ public:
   long __stdcall GetCPUFlags() { return NULL; };
   char* __stdcall SaveString(const char* s, int length = -1) { return NULL; };
   char* __stdcall Sprintf(const char* fmt, ...) { return NULL; };
-  char* __stdcall VSprintf(const char* fmt, void* val) { return NULL; };
+  char* __stdcall VSprintf(const char* fmt, va_list val) { return NULL; };
   void __stdcall ThrowError(const char* fmt, ...) {};
   bool __stdcall FunctionExists(const char* name) { return false; };
   AVSValue __stdcall Invoke(const char* name, const AVSValue args, const char** arg_names=0) { return NULL; };

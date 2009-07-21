@@ -92,7 +92,7 @@ public:
   long __stdcall GetCPUFlags();
   char* __stdcall SaveString(const char* s, int length = -1);
   char* __stdcall Sprintf(const char* fmt, ...);
-  char* __stdcall VSprintf(const char* fmt, void* val);
+  char* __stdcall VSprintf(const char* fmt, va_list val);
   void __stdcall ThrowError(const char* fmt, ...);
   virtual void __stdcall AddFunction(const char* name, const char* paramstr, const char* srccapstr, const char* sinkcapstr, ApplyFunc apply, void* user_data=0);
   bool __stdcall FunctionExists(const char* name);

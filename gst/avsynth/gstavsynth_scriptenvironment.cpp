@@ -275,11 +275,11 @@ ScriptEnvironment::Sprintf (const char* fmt, ...)
 }
 
 char*
-ScriptEnvironment::VSprintf (const char* fmt, void* val)
+ScriptEnvironment::VSprintf (const char* fmt, va_list val)
 {
   char *result = NULL, *tmp = NULL;
   /* This kinda defeats the purpose of the string chunks... */
-  tmp = g_strdup_vprintf (fmt, (char *) val);
+  tmp = g_strdup_vprintf (fmt, val);
   result = ScriptEnvironment::SaveString (tmp);
   g_free (tmp);
   return result;

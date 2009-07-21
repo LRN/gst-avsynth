@@ -55,32 +55,16 @@ enum { AVISYNTH_INTERFACE_VERSION = 3 };
 //#include <windef.h>
 #include <stdint.h>
 #include <string.h>
+#include <glib.h>
 
 #ifndef BYTE
-typedef uint8_t BYTE;
+typedef guint8 BYTE;
 #endif
 
-#ifndef __int64
-typedef int64_t __int64;
-#endif
-
-#ifndef TRUE
-#  define TRUE 1
-#endif
-
-#ifndef FALSE
-#  define FALSE 0
-#endif
+typedef gint64 __int64;
+typedef guint64 __uint64;
 
 /* Portability macros from wine (winehq.org) LGPL licensed */
-
-#if !defined(_MSC_VER) && !defined(__int64)
-# if defined(_WIN64) && !defined(__MINGW64__)
-#   define __int64 long
-# else
-#   define __int64 long long
-# endif
-#endif
 
 #ifndef __stdcall
 # ifdef __i386__
@@ -132,13 +116,13 @@ typedef int64_t __int64;
 //#include <objbase.h>
 
 // Raster types used by VirtualDub & Avisynth
-#define in64 (__int64)(unsigned short)
-typedef unsigned long	Pixel;    // this will break on 64-bit machines!
-typedef unsigned long	Pixel32;
-typedef unsigned char	Pixel8;
-typedef long		PixCoord;
-typedef long		PixDim;
-typedef long		PixOffset;
+#define in64 (__int64)(guint16)
+typedef guint32	Pixel;
+typedef guint32	Pixel32;
+typedef guchar	Pixel8;
+typedef guint32	PixCoord;
+typedef guint32	PixDim;
+typedef guint32	PixOffset;
 
 
 /* Compiler-specific crap */
@@ -333,19 +317,19 @@ struct VideoInfo {
 
   // Range protected multiply-divide of FPS
   void MulDivFPS(unsigned multiplier, unsigned divisor) {
-    unsigned __int64 numerator = ((__int64) fps_numerator) * ((__int64) multiplier);
-    unsigned __int64 denominator = ((__int64) fps_denominator) * ((__int64) divisor);
-    //unsigned __int64 numerator   = UInt32x32To64(fps_numerator,   multiplier);
-    //unsigned __int64 denominator = UInt32x32To64(fps_denominator, divisor);
+    __uint64 numerator = ((__int64) fps_numerator) * ((__int64) multiplier);
+    __uint64 denominator = ((__int64) fps_denominator) * ((__int64) divisor);
+    //__uint64 numerator   = UInt32x32To64(fps_numerator,   multiplier);
+    //__uint64 denominator = UInt32x32To64(fps_denominator, divisor);
 
-	unsigned __int64 x=numerator, y=denominator;
+	__uint64 x=numerator, y=denominator;
 	while (y) {   // find gcd
-	  unsigned __int64 t = x%y; x = y; y = t;
+	  __uint64 t = x%y; x = y; y = t;
 	}
 	numerator   /= x; // normalize
 	denominator /= x;
 
-	unsigned __int64 temp = numerator | denominator; // Just looking top bit
+	__uint64 temp = numerator | denominator; // Just looking top bit
 	unsigned u = 0;
 	while (temp & 0xffffffff80000000LL) { // or perhaps > 16777216*2
 	  temp = temp >> 1;

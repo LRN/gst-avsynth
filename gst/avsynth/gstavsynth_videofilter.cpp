@@ -543,6 +543,7 @@ gst_avsynth_video_filter_framegetter (void *data)
   gboolean push = TRUE;
   gboolean eos = FALSE;
   gint64 clip_start, clip_end, framenum;
+  GstEvent *seekevent;
 
   /* FIXME: Uh...shouldn't i use typecast macro here? */
   avsynth_video_filter = (GstAVSynthVideoFilter *) data;
@@ -554,6 +555,18 @@ gst_avsynth_video_filter_framegetter (void *data)
   {
     PVideoFrame vf = NULL;
     GstBuffer *outbuf;
+
+    GST_OBJECT_LOCK (avsynth_video_filter);
+    if (G_UNLIKELY (avsynth_video_filter->seek_event))
+    {
+      seekevent = avsynth_video_filter->seek_event;
+      avsynth_video_filter->seek_event = NULL;
+      GST_OBJECT_UNLOCK (avsynth_video_filter);
+      avsynth_video_filter_perform_seek (avsynth_video_filter, seekevent, TRUE);
+      gst_event_unref (seekevent);
+    }
+    else
+      GST_OBJECT_UNLOCK (avsynth_video_filter);
 
     for (guint i = 0; i < avsynth_video_filter->sinks->len; i++)
     {
@@ -909,6 +922,8 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
   avsynth_video_filter->segment.time = 0;
 
   avsynth_video_filter->eos = FALSE;
+
+  avsynth_video_filter->seek_events = NULL;
 }
 
 void
@@ -1315,9 +1330,11 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
     gst_event_set_seqnum (tevent, seqnum);
     gst_pad_push_event (avsynth_video_filter->srcpad, tevent);
   } else {
+/*
     g_mutex_lock (avsynth_video_filter->stop_mutex);
     avsynth_video_filter->pause = TRUE;
     g_mutex_unlock (avsynth_video_filter->stop_mutex);
+*/
   }
 
   /* unblock streaming thread. */
@@ -1469,10 +1486,12 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
 
   /* and restart the task in case it got paused explicitely or by
    * the FLUSH_START event we pushed out. */
+/*
   g_mutex_lock (avsynth_video_filter->stop_mutex);
   avsynth_video_filter->pause = FALSE;
   g_cond_signal (avsynth_video_filter->pause_cond);
   g_mutex_unlock (avsynth_video_filter->stop_mutex);
+*/
 /*  if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) == GST_TASK_STOPPED) && avsynth_video_filter->impl))
   {
     GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
@@ -1494,14 +1513,11 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
     GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
     g_mutex_lock (sink->sinkmutex);
     sink->seek = TRUE;
+    /* Prevents framegetter from shutting down */
     sink->starving = FALSE;
-    sink->eos = FALSE;
-    sink->flush = FALSE;
     sink->seeking = FALSE;
     sink->seekhint = seeksegment.time + sink->minframeshift;
     GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Set sink seek hint to %" G_GUINT64_FORMAT, (gpointer) sink->cache, sink->seekhint);
-    /* We're going to seek, GetFrame() should stop waiting */
-    g_cond_signal (sink->cache->vcache_cond);
     g_mutex_unlock (sink->sinkmutex);
     GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
   }
@@ -1544,13 +1560,26 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
       started = GST_PAD_ACTIVATE_MODE (avsynth_video_filter->srcpad) == GST_ACTIVATE_PUSH;
       GST_OBJECT_UNLOCK (avsynth_video_filter->srcpad);
 
+      GST_OBJECT_LOCK (avsynth_video_filter);
+      if (avsynth_video_filter->seek_event)
+        gst_event_unref (avsynth_video_filter->seek_event);
+      avsynth_video_filter->seek_event = gst_event_ref (event);
+
+      if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) != GST_TASK_RUNNING) && avsynth_video_filter->impl))
+      {
+        GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
+        gst_task_start (avsynth_video_filter->framegetter);
+      }
+
+      GST_OBJECT_UNLOCK (avsynth_video_filter);
+      /*
       if (started) {
         GST_DEBUG_OBJECT (avsynth_video_filter, "performing seek");
-        /* when we are running in push mode, we can execute the
-         * seek right now, we need to unlock. */
+        *//* when we are running in push mode, we can execute the
+         * seek right now, we need to unlock. *//*
         res = avsynth_video_filter_perform_seek (avsynth_video_filter, event, TRUE);
       } else {
-        /* GstEvent **event_p; */
+        *//* GstEvent **event_p; */
 
         /* else we store the event and execute the seek when we
          * get activated */
@@ -1563,8 +1592,10 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
         */ 
         /* assume the seek will work */
         /*res = TRUE;*/
-        res = avsynth_video_filter_perform_seek (avsynth_video_filter, event, TRUE);
+        /*res = avsynth_video_filter_perform_seek (avsynth_video_filter, event, TRUE);
       }
+      */
+      res = TRUE;
       break;
     }
     case GST_EVENT_NAVIGATION:
@@ -1684,12 +1715,6 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_EOS:
     {
-      /* TODO: Collect EOS event. If we are waiting for data from the pad,
-       * stop doing so.
-       * Wait until we run out of data and send EOS downstream. We don't
-       * need to wait for EOS on all streams (if one stream have ended, while
-       * others did not, we can't proceed anyways.
-       */
       GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
       g_mutex_lock (sink->sinkmutex);
       sink->eos = TRUE;

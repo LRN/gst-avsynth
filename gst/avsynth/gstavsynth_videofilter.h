@@ -150,9 +150,19 @@ struct _GstAVSynthVideoFilter
   VideoInfo vi;
 
   /* TRUE when framegetter can't produce any more frames
-   * (usually - because one of the source frames has reached eos)
+   * (usually - because one of the source frames have reached eos)
    */
   gboolean eos;
+
+  /* A variable to hold incoming seek events. When a seek event is received,
+   * it is assigned to this variable.
+   * Once GetFrame() returns control to the driving thread, GstAVSynth will
+   * use this event to perform a seek.
+   * GstAVSynth will not seek while GetFrame() is in the process.
+   * When a new seek event is received before the driving thread has a chance
+   * to seek with currently stored event, it will be replaced.
+   */
+  GstEvent *seekevent;
 };
 
 struct AVSynthVideoFilterParam

@@ -162,7 +162,7 @@ struct _GstAVSynthVideoFilter
    * When a new seek event is received before the driving thread has a chance
    * to seek with currently stored event, it will be replaced.
    */
-  GstEvent *seekevent;
+  GstEvent *seek_event;
 };
 
 struct AVSynthVideoFilterParam

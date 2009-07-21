@@ -61,8 +61,11 @@ enum { AVISYNTH_INTERFACE_VERSION = 3 };
 typedef guint8 BYTE;
 #endif
 
+#if !defined(G_OS_WIN32)
 typedef gint64 __int64;
+#endif
 typedef guint64 __uint64;
+
 
 /* Portability macros from wine (winehq.org) LGPL licensed */
 

@@ -538,6 +538,325 @@ GstElement *debug_get_sink (GstElement *pipeline)
   return item;
 }
 
+static gboolean
+gst_avsynth_video_filter_prepare_seek_segment (GstAVSynthVideoFilter * avsynth_video_filter,
+    GstEvent * event, GstSegment * segment)
+{
+  /* By default, we try one of 2 things:
+   *   - For absolute seek positions, convert the requested position to our 
+   *     configured processing format and place it in the output segment \
+   *   - For relative seek positions, convert our current (input) values to the
+   *     seek format, adjust by the relative seek offset and then convert back to
+   *     the processing format
+   */
+  GstSeekType cur_type, stop_type;
+  gint64 cur, stop;
+  GstSeekFlags flags;
+  GstFormat seek_format, dest_format;
+  gdouble rate;
+  gboolean update;
+  gboolean res = TRUE;
+
+  gst_event_parse_seek (event, &rate, &seek_format, &flags,
+      &cur_type, &cur, &stop_type, &stop);
+  dest_format = segment->format;
+
+  if (seek_format == dest_format) {
+    gst_segment_set_seek (segment, rate, seek_format, flags,
+        cur_type, cur, stop_type, stop, &update);
+    return TRUE;
+  }
+
+  if (cur_type != GST_SEEK_TYPE_NONE) {
+    /* FIXME: Handle seek_cur & seek_end by converting the input segment vals */
+    res =
+        gst_pad_query_convert (avsynth_video_filter->srcpad, seek_format, cur, &dest_format,
+        &cur);
+    cur_type = GST_SEEK_TYPE_SET;
+  }
+
+  if (res && stop_type != GST_SEEK_TYPE_NONE) {
+    /* FIXME: Handle seek_cur & seek_end by converting the input segment vals */
+    res =
+        gst_pad_query_convert (avsynth_video_filter->srcpad, seek_format, stop, &dest_format,
+        &stop);
+    stop_type = GST_SEEK_TYPE_SET;
+  }
+
+  /* And finally, configure our output segment in the desired format */
+  gst_segment_set_seek (segment, rate, dest_format, flags, cur_type, cur,
+      stop_type, stop, &update);
+
+  if (!res)
+    goto no_format;
+
+  return res;
+
+no_format:
+  {
+    GST_DEBUG_OBJECT (avsynth_video_filter, "undefined format given, seek aborted.");
+    return FALSE;
+  }
+}
+
+/* This is a rip off basesrc class */
+static gboolean
+avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter, GstEvent * event, gboolean unlock)
+{
+  gboolean res = TRUE;
+  gdouble rate;
+  GstFormat seek_format, dest_format;
+  GstSeekFlags flags;
+  GstSeekType cur_type, stop_type;
+  gint64 cur, stop;
+  gboolean flush;
+  gboolean update;
+  gboolean relative_seek = FALSE;
+  gboolean seekseg_configured = FALSE;
+  GstSegment seeksegment;
+  guint32 seqnum;
+  GstEvent *tevent;
+
+  GST_DEBUG_OBJECT (avsynth_video_filter, "doing seek");
+
+  dest_format = avsynth_video_filter->segment.format;
+
+  if (event) {
+    gst_event_parse_seek (event, &rate, &seek_format, &flags,
+        &cur_type, &cur, &stop_type, &stop);
+
+    relative_seek = SEEK_TYPE_IS_RELATIVE (cur_type) ||
+        SEEK_TYPE_IS_RELATIVE (stop_type);
+
+    if (dest_format != seek_format && !relative_seek) {
+      /* If we have an ABSOLUTE position (SEEK_SET only), we can convert it
+       * here before taking the stream lock, otherwise we must convert it later,
+       * once we have the stream lock and can read the last configures segment
+       * start and stop positions */
+      gst_segment_init (&seeksegment, dest_format);
+
+      if (!gst_avsynth_video_filter_prepare_seek_segment (avsynth_video_filter, event, &seeksegment))
+        goto prepare_failed;
+
+      seekseg_configured = TRUE;
+    }
+
+    flush = flags & GST_SEEK_FLAG_FLUSH;
+    seqnum = gst_event_get_seqnum (event);
+  } else {
+    /* FIXME: Unlikey to happen? */
+    flush = FALSE;
+    /* get next seqnum */
+    seqnum = gst_util_seqnum_next ();
+  }
+
+  /* send flush start */
+  if (flush) {
+    tevent = gst_event_new_flush_start ();
+    gst_event_set_seqnum (tevent, seqnum);
+    gst_pad_push_event (avsynth_video_filter->srcpad, tevent);
+  } else {
+/*
+    g_mutex_lock (avsynth_video_filter->stop_mutex);
+    avsynth_video_filter->pause = TRUE;
+    g_mutex_unlock (avsynth_video_filter->stop_mutex);
+*/
+  }
+
+  /* unblock streaming thread. */
+  /* FIXME: replace with something suitable
+  gst_base_src_set_flushing (src, TRUE, FALSE, unlock, &playing); */
+
+  /* grab streaming lock, this should eventually be possible, either
+   * because the task is paused, our streaming thread stopped 
+   * or because our peer is flushing. */
+  GST_PAD_STREAM_LOCK (avsynth_video_filter->srcpad);
+/*
+  if (G_UNLIKELY (avsynth_video_filter->priv->seqnum == seqnum)) {
+    *//* we have seen this event before, issue a warning for now *//*
+    GST_WARNING_OBJECT (src, "duplicate event found %" G_GUINT32_FORMAT,
+        seqnum);
+  } else {
+    src->priv->seqnum = seqnum;
+    GST_DEBUG_OBJECT (src, "seek with seqnum %" G_GUINT32_FORMAT, seqnum);
+  }
+*/
+
+  /* FIXME: replace with something suitable
+  gst_base_src_set_flushing (src, FALSE, playing, unlock, NULL); */
+  
+  /* If we configured the seeksegment above, don't overwrite it now. Otherwise
+   * copy the current segment info into the temp segment that we can actually
+   * attempt the seek with. We only update the real segment if the seek suceeds. */
+  if (!seekseg_configured) {
+    g_mutex_lock (avsynth_video_filter->stop_mutex);
+    memcpy (&seeksegment, &avsynth_video_filter->seeksegment, sizeof (GstSegment));
+
+    /* now configure the final seek segment */
+    if (event) {
+      if (avsynth_video_filter->seeksegment.format != seek_format) {
+        /* OK, here's where we give the subclass a chance to convert the relative
+         * seek into an absolute one in the processing format. We set up any
+         * absolute seek above, before taking the stream lock. */
+        if (!gst_avsynth_video_filter_prepare_seek_segment (avsynth_video_filter, event, &seeksegment)) {
+          GST_DEBUG_OBJECT (avsynth_video_filter, "Preparing the seek failed after flushing. "
+              "Aborting seek");
+          res = FALSE;
+        }
+      } else {
+        /* The seek format matches our processing format, no need to ask the
+         * the subclass to configure the segment. */
+        gst_segment_set_seek (&seeksegment, rate, seek_format, flags,
+            cur_type, cur, stop_type, stop, &update);
+      }
+    }
+    g_mutex_unlock (avsynth_video_filter->stop_mutex);
+    /* Else, no seek event passed, so we're just (re)starting the 
+       current segment. */
+  }
+
+  if (res) {
+    GST_DEBUG_OBJECT (avsynth_video_filter, "segment configured from %" G_GINT64_FORMAT
+        " to %" G_GINT64_FORMAT ", position %" G_GINT64_FORMAT,
+        seeksegment.start, seeksegment.stop, seeksegment.last_stop);
+
+    /* do the seek, segment.last_stop contains the new position. */
+    /* update our offset if the start/stop position was updated */
+    if (seeksegment.format == GST_FORMAT_DEFAULT) {
+      seeksegment.time = seeksegment.start;
+    } else if (seeksegment.start == 0) {
+      seeksegment.time = 0;
+    } else {
+      res = FALSE;
+      GST_INFO_OBJECT (avsynth_video_filter, "Can't do a seek");
+    }
+  }
+
+  /* and prepare to continue streaming */
+  if (flush) {
+    tevent = gst_event_new_flush_stop ();
+    gst_event_set_seqnum (tevent, seqnum);
+    /* send flush stop, peer will accept data and events again. We
+     * are not yet providing data as we still have the STREAM_LOCK. */
+    gst_pad_push_event (avsynth_video_filter->srcpad, tevent);
+  } else if (res /*&& avsynth_video_filter->data.ABI.running*/) {
+
+    /* queue the segment for sending in the stream thread */
+/*
+    if (src->priv->close_segment)
+      gst_event_unref (src->priv->close_segment);
+    src->priv->close_segment =
+        gst_event_new_new_segment_full (TRUE,
+        src->segment.rate, src->segment.applied_rate, src->segment.format,
+        src->segment.start, src->segment.last_stop, src->segment.time);
+    gst_event_set_seqnum (src->priv->close_segment, seqnum);
+*/  
+  }
+
+  /* The subclass must have converted the segment to the processing format 
+   * by now */
+  if (res && seeksegment.format != dest_format) {
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Failed to prepare a seek segment "
+        "in the correct format. Aborting seek.");
+    res = FALSE;
+  }
+
+  /* if successfull seek, we update our real segment and push
+   * out the new segment. */
+  if (res) {
+    g_mutex_lock (avsynth_video_filter->stop_mutex);
+    memcpy (&avsynth_video_filter->seeksegment, &seeksegment, sizeof (GstSegment));
+
+    if (avsynth_video_filter->seeksegment.flags & GST_SEEK_FLAG_SEGMENT) {
+      GstMessage *message;
+
+      message = gst_message_new_segment_start (GST_OBJECT (avsynth_video_filter),
+          avsynth_video_filter->seeksegment.format, avsynth_video_filter->seeksegment.last_stop);
+      gst_message_set_seqnum (message, seqnum);
+
+      gst_element_post_message (GST_ELEMENT (avsynth_video_filter), message);
+    }
+
+    /* for deriving a stop position for the playback segment from the seek
+     * segment, we must take the duration when the stop is not set */
+/*
+    if ((stop = avsynth_video_filter->segment.stop) == -1)
+      stop = avsynth_video_filter->segment.duration;
+
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Sending newsegment from %" G_GINT64_FORMAT
+        " to %" G_GINT64_FORMAT, avsynth_video_filter->segment.start, stop);
+*/
+    /* now replace the old segment so that we send it in the stream thread the
+     * next time it is scheduled. */
+    /*
+    if (src->priv->start_segment)
+      gst_event_unref (src->priv->start_segment);
+    if (src->segment.rate >= 0.0) {
+      *//* forward, we send data from last_stop to stop *//*
+      src->priv->start_segment =
+          gst_event_new_new_segment_full (FALSE,
+          src->segment.rate, src->segment.applied_rate, src->segment.format,
+          src->segment.last_stop, stop, src->segment.time);
+    } else {
+      *//* reverse, we send data from last_stop to start *//*
+      src->priv->start_segment =
+          gst_event_new_new_segment_full (FALSE,
+          src->segment.rate, src->segment.applied_rate, src->segment.format,
+          src->segment.start, src->segment.last_stop, src->segment.time);
+    }
+    gst_event_set_seqnum (src->priv->start_segment, seqnum);
+    */
+    avsynth_video_filter->newsegment = TRUE;
+    g_mutex_unlock (avsynth_video_filter->stop_mutex);
+  }
+
+  /* and restart the task in case it got paused explicitely or by
+   * the FLUSH_START event we pushed out. */
+/*
+  g_mutex_lock (avsynth_video_filter->stop_mutex);
+  avsynth_video_filter->pause = FALSE;
+  g_cond_signal (avsynth_video_filter->pause_cond);
+  g_mutex_unlock (avsynth_video_filter->stop_mutex);
+*/
+/*  if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) == GST_TASK_STOPPED) && avsynth_video_filter->impl))
+  {
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
+    gst_task_start (avsynth_video_filter->framegetter);
+  }
+*/
+
+  /* and release the lock again so we can continue streaming */
+  GST_PAD_STREAM_UNLOCK (avsynth_video_filter->srcpad);
+
+  /* Tell all sinks that downstream pipeline just made a seek and that
+   * out-of-cache-range frame requests should not cause the cache to grow, but
+   * should cause upstream seek instead.
+   */
+  for (guint i = 0; i < avsynth_video_filter->sinks->len; i++)
+  {
+    AVSynthSink *sink = NULL;
+    sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
+    g_mutex_lock (sink->sinkmutex);
+    sink->seek = TRUE;
+    /* Prevents framegetter from shutting down */
+    sink->starving = FALSE;
+    sink->seeking = FALSE;
+    sink->seekhint = seeksegment.time + sink->minframeshift;
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Set sink seek hint to %" G_GUINT64_FORMAT, (gpointer) sink->cache, sink->seekhint);
+    g_mutex_unlock (sink->sinkmutex);
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
+  }
+
+  return res;
+
+  /* ERROR */
+prepare_failed:
+  GST_DEBUG_OBJECT (avsynth_video_filter, "Preparing the seek failed before flushing. "
+      "Aborting seek");
+  return FALSE;
+}
+
 void
 gst_avsynth_video_filter_framegetter (void *data)
 {
@@ -926,7 +1245,7 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
 
   avsynth_video_filter->eos = FALSE;
 
-  avsynth_video_filter->seek_events = NULL;
+  avsynth_video_filter->seek_event = NULL;
 }
 
 void
@@ -1215,325 +1534,6 @@ gst_avsynth_video_filter_src_convert (GstPad * pad,
   return res;
 }
 
-static gboolean
-gst_avsynth_video_filter_prepare_seek_segment (GstAVSynthVideoFilter * avsynth_video_filter,
-    GstEvent * event, GstSegment * segment)
-{
-  /* By default, we try one of 2 things:
-   *   - For absolute seek positions, convert the requested position to our 
-   *     configured processing format and place it in the output segment \
-   *   - For relative seek positions, convert our current (input) values to the
-   *     seek format, adjust by the relative seek offset and then convert back to
-   *     the processing format
-   */
-  GstSeekType cur_type, stop_type;
-  gint64 cur, stop;
-  GstSeekFlags flags;
-  GstFormat seek_format, dest_format;
-  gdouble rate;
-  gboolean update;
-  gboolean res = TRUE;
-
-  gst_event_parse_seek (event, &rate, &seek_format, &flags,
-      &cur_type, &cur, &stop_type, &stop);
-  dest_format = segment->format;
-
-  if (seek_format == dest_format) {
-    gst_segment_set_seek (segment, rate, seek_format, flags,
-        cur_type, cur, stop_type, stop, &update);
-    return TRUE;
-  }
-
-  if (cur_type != GST_SEEK_TYPE_NONE) {
-    /* FIXME: Handle seek_cur & seek_end by converting the input segment vals */
-    res =
-        gst_pad_query_convert (avsynth_video_filter->srcpad, seek_format, cur, &dest_format,
-        &cur);
-    cur_type = GST_SEEK_TYPE_SET;
-  }
-
-  if (res && stop_type != GST_SEEK_TYPE_NONE) {
-    /* FIXME: Handle seek_cur & seek_end by converting the input segment vals */
-    res =
-        gst_pad_query_convert (avsynth_video_filter->srcpad, seek_format, stop, &dest_format,
-        &stop);
-    stop_type = GST_SEEK_TYPE_SET;
-  }
-
-  /* And finally, configure our output segment in the desired format */
-  gst_segment_set_seek (segment, rate, dest_format, flags, cur_type, cur,
-      stop_type, stop, &update);
-
-  if (!res)
-    goto no_format;
-
-  return res;
-
-no_format:
-  {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "undefined format given, seek aborted.");
-    return FALSE;
-  }
-}
-
-/* This is a rip off basesrc class */
-static gboolean
-avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter, GstEvent * event, gboolean unlock)
-{
-  gboolean res = TRUE;
-  gdouble rate;
-  GstFormat seek_format, dest_format;
-  GstSeekFlags flags;
-  GstSeekType cur_type, stop_type;
-  gint64 cur, stop;
-  gboolean flush;
-  gboolean update;
-  gboolean relative_seek = FALSE;
-  gboolean seekseg_configured = FALSE;
-  GstSegment seeksegment;
-  guint32 seqnum;
-  GstEvent *tevent;
-
-  GST_DEBUG_OBJECT (avsynth_video_filter, "doing seek");
-
-  dest_format = avsynth_video_filter->segment.format;
-
-  if (event) {
-    gst_event_parse_seek (event, &rate, &seek_format, &flags,
-        &cur_type, &cur, &stop_type, &stop);
-
-    relative_seek = SEEK_TYPE_IS_RELATIVE (cur_type) ||
-        SEEK_TYPE_IS_RELATIVE (stop_type);
-
-    if (dest_format != seek_format && !relative_seek) {
-      /* If we have an ABSOLUTE position (SEEK_SET only), we can convert it
-       * here before taking the stream lock, otherwise we must convert it later,
-       * once we have the stream lock and can read the last configures segment
-       * start and stop positions */
-      gst_segment_init (&seeksegment, dest_format);
-
-      if (!gst_avsynth_video_filter_prepare_seek_segment (avsynth_video_filter, event, &seeksegment))
-        goto prepare_failed;
-
-      seekseg_configured = TRUE;
-    }
-
-    flush = flags & GST_SEEK_FLAG_FLUSH;
-    seqnum = gst_event_get_seqnum (event);
-  } else {
-    /* FIXME: Unlikey to happen? */
-    flush = FALSE;
-    /* get next seqnum */
-    seqnum = gst_util_seqnum_next ();
-  }
-
-  /* send flush start */
-  if (flush) {
-    tevent = gst_event_new_flush_start ();
-    gst_event_set_seqnum (tevent, seqnum);
-    gst_pad_push_event (avsynth_video_filter->srcpad, tevent);
-  } else {
-/*
-    g_mutex_lock (avsynth_video_filter->stop_mutex);
-    avsynth_video_filter->pause = TRUE;
-    g_mutex_unlock (avsynth_video_filter->stop_mutex);
-*/
-  }
-
-  /* unblock streaming thread. */
-  /* FIXME: replace with something suitable
-  gst_base_src_set_flushing (src, TRUE, FALSE, unlock, &playing); */
-
-  /* grab streaming lock, this should eventually be possible, either
-   * because the task is paused, our streaming thread stopped 
-   * or because our peer is flushing. */
-  GST_PAD_STREAM_LOCK (avsynth_video_filter->srcpad);
-/*
-  if (G_UNLIKELY (avsynth_video_filter->priv->seqnum == seqnum)) {
-    *//* we have seen this event before, issue a warning for now *//*
-    GST_WARNING_OBJECT (src, "duplicate event found %" G_GUINT32_FORMAT,
-        seqnum);
-  } else {
-    src->priv->seqnum = seqnum;
-    GST_DEBUG_OBJECT (src, "seek with seqnum %" G_GUINT32_FORMAT, seqnum);
-  }
-*/
-
-  /* FIXME: replace with something suitable
-  gst_base_src_set_flushing (src, FALSE, playing, unlock, NULL); */
-  
-  /* If we configured the seeksegment above, don't overwrite it now. Otherwise
-   * copy the current segment info into the temp segment that we can actually
-   * attempt the seek with. We only update the real segment if the seek suceeds. */
-  if (!seekseg_configured) {
-    g_mutex_lock (avsynth_video_filter->stop_mutex);
-    memcpy (&seeksegment, &avsynth_video_filter->seeksegment, sizeof (GstSegment));
-
-    /* now configure the final seek segment */
-    if (event) {
-      if (avsynth_video_filter->seeksegment.format != seek_format) {
-        /* OK, here's where we give the subclass a chance to convert the relative
-         * seek into an absolute one in the processing format. We set up any
-         * absolute seek above, before taking the stream lock. */
-        if (!gst_avsynth_video_filter_prepare_seek_segment (avsynth_video_filter, event, &seeksegment)) {
-          GST_DEBUG_OBJECT (avsynth_video_filter, "Preparing the seek failed after flushing. "
-              "Aborting seek");
-          res = FALSE;
-        }
-      } else {
-        /* The seek format matches our processing format, no need to ask the
-         * the subclass to configure the segment. */
-        gst_segment_set_seek (&seeksegment, rate, seek_format, flags,
-            cur_type, cur, stop_type, stop, &update);
-      }
-    }
-    g_mutex_unlock (avsynth_video_filter->stop_mutex);
-    /* Else, no seek event passed, so we're just (re)starting the 
-       current segment. */
-  }
-
-  if (res) {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "segment configured from %" G_GINT64_FORMAT
-        " to %" G_GINT64_FORMAT ", position %" G_GINT64_FORMAT,
-        seeksegment.start, seeksegment.stop, seeksegment.last_stop);
-
-    /* do the seek, segment.last_stop contains the new position. */
-    /* update our offset if the start/stop position was updated */
-    if (seeksegment.format == GST_FORMAT_DEFAULT) {
-      seeksegment.time = seeksegment.start;
-    } else if (seeksegment.start == 0) {
-      seeksegment.time = 0;
-    } else {
-      res = FALSE;
-      GST_INFO_OBJECT (avsynth_video_filter, "Can't do a seek");
-    }
-  }
-
-  /* and prepare to continue streaming */
-  if (flush) {
-    tevent = gst_event_new_flush_stop ();
-    gst_event_set_seqnum (tevent, seqnum);
-    /* send flush stop, peer will accept data and events again. We
-     * are not yet providing data as we still have the STREAM_LOCK. */
-    gst_pad_push_event (avsynth_video_filter->srcpad, tevent);
-  } else if (res /*&& avsynth_video_filter->data.ABI.running*/) {
-
-    /* queue the segment for sending in the stream thread */
-/*
-    if (src->priv->close_segment)
-      gst_event_unref (src->priv->close_segment);
-    src->priv->close_segment =
-        gst_event_new_new_segment_full (TRUE,
-        src->segment.rate, src->segment.applied_rate, src->segment.format,
-        src->segment.start, src->segment.last_stop, src->segment.time);
-    gst_event_set_seqnum (src->priv->close_segment, seqnum);
-*/  
-  }
-
-  /* The subclass must have converted the segment to the processing format 
-   * by now */
-  if (res && seeksegment.format != dest_format) {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Failed to prepare a seek segment "
-        "in the correct format. Aborting seek.");
-    res = FALSE;
-  }
-
-  /* if successfull seek, we update our real segment and push
-   * out the new segment. */
-  if (res) {
-    g_mutex_lock (avsynth_video_filter->stop_mutex);
-    memcpy (&avsynth_video_filter->seeksegment, &seeksegment, sizeof (GstSegment));
-
-    if (avsynth_video_filter->seeksegment.flags & GST_SEEK_FLAG_SEGMENT) {
-      GstMessage *message;
-
-      message = gst_message_new_segment_start (GST_OBJECT (avsynth_video_filter),
-          avsynth_video_filter->seeksegment.format, avsynth_video_filter->seeksegment.last_stop);
-      gst_message_set_seqnum (message, seqnum);
-
-      gst_element_post_message (GST_ELEMENT (avsynth_video_filter), message);
-    }
-
-    /* for deriving a stop position for the playback segment from the seek
-     * segment, we must take the duration when the stop is not set */
-/*
-    if ((stop = avsynth_video_filter->segment.stop) == -1)
-      stop = avsynth_video_filter->segment.duration;
-
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Sending newsegment from %" G_GINT64_FORMAT
-        " to %" G_GINT64_FORMAT, avsynth_video_filter->segment.start, stop);
-*/
-    /* now replace the old segment so that we send it in the stream thread the
-     * next time it is scheduled. */
-    /*
-    if (src->priv->start_segment)
-      gst_event_unref (src->priv->start_segment);
-    if (src->segment.rate >= 0.0) {
-      *//* forward, we send data from last_stop to stop *//*
-      src->priv->start_segment =
-          gst_event_new_new_segment_full (FALSE,
-          src->segment.rate, src->segment.applied_rate, src->segment.format,
-          src->segment.last_stop, stop, src->segment.time);
-    } else {
-      *//* reverse, we send data from last_stop to start *//*
-      src->priv->start_segment =
-          gst_event_new_new_segment_full (FALSE,
-          src->segment.rate, src->segment.applied_rate, src->segment.format,
-          src->segment.start, src->segment.last_stop, src->segment.time);
-    }
-    gst_event_set_seqnum (src->priv->start_segment, seqnum);
-    */
-    avsynth_video_filter->newsegment = TRUE;
-    g_mutex_unlock (avsynth_video_filter->stop_mutex);
-  }
-
-  /* and restart the task in case it got paused explicitely or by
-   * the FLUSH_START event we pushed out. */
-/*
-  g_mutex_lock (avsynth_video_filter->stop_mutex);
-  avsynth_video_filter->pause = FALSE;
-  g_cond_signal (avsynth_video_filter->pause_cond);
-  g_mutex_unlock (avsynth_video_filter->stop_mutex);
-*/
-/*  if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) == GST_TASK_STOPPED) && avsynth_video_filter->impl))
-  {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
-    gst_task_start (avsynth_video_filter->framegetter);
-  }
-*/
-
-  /* and release the lock again so we can continue streaming */
-  GST_PAD_STREAM_UNLOCK (avsynth_video_filter->srcpad);
-
-  /* Tell all sinks that downstream pipeline just made a seek and that
-   * out-of-cache-range frame requests should not cause the cache to grow, but
-   * should cause upstream seek instead.
-   */
-  for (guint i = 0; i < avsynth_video_filter->sinks->len; i++)
-  {
-    AVSynthSink *sink = NULL;
-    sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
-    g_mutex_lock (sink->sinkmutex);
-    sink->seek = TRUE;
-    /* Prevents framegetter from shutting down */
-    sink->starving = FALSE;
-    sink->seeking = FALSE;
-    sink->seekhint = seeksegment.time + sink->minframeshift;
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Set sink seek hint to %" G_GUINT64_FORMAT, (gpointer) sink->cache, sink->seekhint);
-    g_mutex_unlock (sink->sinkmutex);
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
-  }
-
-  return res;
-
-  /* ERROR */
-prepare_failed:
-  GST_DEBUG_OBJECT (avsynth_video_filter, "Preparing the seek failed before flushing. "
-      "Aborting seek");
-  return FALSE;
-}
-
 
 gboolean
 gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
@@ -1568,7 +1568,7 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
         gst_event_unref (avsynth_video_filter->seek_event);
       avsynth_video_filter->seek_event = gst_event_ref (event);
 
-      if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) != GST_TASK_RUNNING) && avsynth_video_filter->impl))
+      if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) != GST_TASK_STARTED) && avsynth_video_filter->impl))
       {
         GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
         gst_task_start (avsynth_video_filter->framegetter);

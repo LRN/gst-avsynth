@@ -225,8 +225,6 @@ gboolean gst_avsynth_video_filter_negotiate (GstAVSynthVideoFilter * avsynth_vid
 
 gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *caps, VideoInfo *vi);
 
-static gboolean gst_avsynth_video_filter_src_convert (GstPad * pad, GstFormat src_format, gint64 src_value,
-    GstFormat * dest_format, gint64 * dest_value);
 
 G_END_DECLS
 

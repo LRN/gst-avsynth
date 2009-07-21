@@ -689,12 +689,12 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
    * copy the current segment info into the temp segment that we can actually
    * attempt the seek with. We only update the real segment if the seek suceeds. */
   if (!seekseg_configured) {
-    g_mutex_lock (avsynth_video_filter->stop_mutex);
-    memcpy (&seeksegment, &avsynth_video_filter->seeksegment, sizeof (GstSegment));
+//    g_mutex_lock (avsynth_video_filter->stop_mutex);
+    memcpy (&seeksegment, &avsynth_video_filter->segment, sizeof (GstSegment));
 
     /* now configure the final seek segment */
     if (event) {
-      if (avsynth_video_filter->seeksegment.format != seek_format) {
+      if (avsynth_video_filter->segment.format != seek_format) {
         /* OK, here's where we give the subclass a chance to convert the relative
          * seek into an absolute one in the processing format. We set up any
          * absolute seek above, before taking the stream lock. */
@@ -710,7 +710,7 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
             cur_type, cur, stop_type, stop, &update);
       }
     }
-    g_mutex_unlock (avsynth_video_filter->stop_mutex);
+//    g_mutex_unlock (avsynth_video_filter->stop_mutex);
     /* Else, no seek event passed, so we're just (re)starting the 
        current segment. */
   }
@@ -764,7 +764,7 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
   /* if successfull seek, we update our real segment and push
    * out the new segment. */
   if (res) {
-    g_mutex_lock (avsynth_video_filter->stop_mutex);
+//    g_mutex_lock (avsynth_video_filter->stop_mutex);
     memcpy (&avsynth_video_filter->seeksegment, &seeksegment, sizeof (GstSegment));
 
     if (avsynth_video_filter->seeksegment.flags & GST_SEEK_FLAG_SEGMENT) {
@@ -807,7 +807,7 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
     gst_event_set_seqnum (src->priv->start_segment, seqnum);
     */
     avsynth_video_filter->newsegment = TRUE;
-    g_mutex_unlock (avsynth_video_filter->stop_mutex);
+//    g_mutex_unlock (avsynth_video_filter->stop_mutex);
   }
 
   /* and restart the task in case it got paused explicitely or by
@@ -878,13 +878,21 @@ gst_avsynth_video_filter_framegetter (void *data)
     PVideoFrame vf = NULL;
     GstBuffer *outbuf;
 
+    /* Store it, we'll need it later */
+    framenum = avsynth_video_filter->segment.time;
+
     GST_OBJECT_LOCK (avsynth_video_filter);
     if (G_UNLIKELY (avsynth_video_filter->seek_event))
     {
+      GST_DEBUG_OBJECT (avsynth_video_filter, "There is a seek event %p waiting for us, let's handle it",avsynth_video_filter->seek_event);
       seekevent = avsynth_video_filter->seek_event;
       avsynth_video_filter->seek_event = NULL;
       GST_OBJECT_UNLOCK (avsynth_video_filter);
       avsynth_video_filter_perform_seek (avsynth_video_filter, seekevent, TRUE);
+      /* Next call to GetFrame() will force sinks to seek to another frame.
+       * However, ->segment is not updated yet, since the seek may fail.
+       */
+      framenum = avsynth_video_filter->seeksegment.start;
       gst_event_unref (seekevent);
     }
     else
@@ -904,9 +912,6 @@ gst_avsynth_video_filter_framegetter (void *data)
     /* Don't let anyone swap the filter from under us while we're working */
     GST_DEBUG_OBJECT (avsynth_video_filter, "Locking impl_mutex");
     g_mutex_lock (avsynth_video_filter->impl_mutex);
-
-    /* Store it, we'll need it later */
-    framenum = avsynth_video_filter->segment.time;
 
     GST_DEBUG_OBJECT (avsynth_video_filter, "Calling GetFrame(%" G_GINT64_FORMAT ")", framenum);
 
@@ -953,6 +958,7 @@ gst_avsynth_video_filter_framegetter (void *data)
     g_mutex_lock (avsynth_video_filter->stop_mutex);
     while (!(stop = avsynth_video_filter->stop) && avsynth_video_filter->pause)
     {
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Pausing framegetter...");
       g_cond_wait (avsynth_video_filter->pause_cond,
           avsynth_video_filter->stop_mutex);
     }
@@ -961,22 +967,21 @@ gst_avsynth_video_filter_framegetter (void *data)
     if (G_UNLIKELY (stop))
       break;
 
-    /* Don't let anyone mess with newsegment and stop */
-    g_mutex_lock (avsynth_video_filter->stop_mutex);
+//    g_mutex_lock (avsynth_video_filter->stop_mutex);
     if (G_UNLIKELY (avsynth_video_filter->newsegment))
     {
-      gint64 stop;
+      gint64 stop_pos;
       GstEvent *newsegevent;
       avsynth_video_filter->newsegment = FALSE;
       avsynth_video_filter->segment = avsynth_video_filter->seeksegment;
       /* for deriving a stop position for the playback segment from the seek
        * segment, we must take the duration when stop is not set */
-      if ((stop = avsynth_video_filter->segment.stop) == -1)
-        stop = avsynth_video_filter->segment.duration;
+      if ((stop_pos= avsynth_video_filter->segment.stop) == -1)
+        stop_pos = avsynth_video_filter->segment.duration;
   
       GST_DEBUG_OBJECT (avsynth_video_filter, "Sending newsegment from %"
          G_GINT64_FORMAT " to %" G_GINT64_FORMAT,
-         avsynth_video_filter->segment.start, stop);
+         avsynth_video_filter->segment.start, stop_pos);
   
       /* now replace the old segment so that we send it in the stream thread
        * the next time it is scheduled.
@@ -986,7 +991,7 @@ gst_avsynth_video_filter_framegetter (void *data)
         newsegevent =
             gst_event_new_new_segment_full (FALSE,
             avsynth_video_filter->segment.rate, avsynth_video_filter->segment.applied_rate, avsynth_video_filter->segment.format,
-            avsynth_video_filter->segment.last_stop, stop, avsynth_video_filter->segment.time);
+            avsynth_video_filter->segment.last_stop, stop_pos, avsynth_video_filter->segment.time);
       } else {
         /* reverse, we send data from last_stop to start */
         newsegevent =
@@ -1038,7 +1043,7 @@ gst_avsynth_video_filter_framegetter (void *data)
           clip_start);
       push = FALSE;
     }
-    g_mutex_unlock (avsynth_video_filter->stop_mutex);
+//    g_mutex_unlock (avsynth_video_filter->stop_mutex);
 
     if (G_UNLIKELY (!push || eos))
     {
@@ -1220,7 +1225,7 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
       GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_query));
   gst_element_add_pad (GST_ELEMENT (avsynth_video_filter), avsynth_video_filter->srcpad);
 
-  gst_segment_init (&avsynth_video_filter->segment, GST_FORMAT_UNDEFINED);
+  gst_segment_init (&avsynth_video_filter->segment, GST_FORMAT_DEFAULT);
 
   avsynth_video_filter->framegetter_mutex = g_new (GStaticRecMutex, 1);
   g_static_rec_mutex_init (avsynth_video_filter->framegetter_mutex);
@@ -1567,6 +1572,7 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
       if (avsynth_video_filter->seek_event)
         gst_event_unref (avsynth_video_filter->seek_event);
       avsynth_video_filter->seek_event = gst_event_ref (event);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Stored seek event %p for further handling", event);
 
       if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) != GST_TASK_STARTED) && avsynth_video_filter->impl))
       {

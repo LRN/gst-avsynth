@@ -625,7 +625,7 @@ public:
   AVSValue(const PClip& c) { type = 'c'; clip = c.GetPointerWithAddRef(); }
   AVSValue(bool b) { type = 'b'; boolean = b; }
   AVSValue(int i) { type = 'i'; integer = i; }
-//  AVSValue(__int64 l) { type = 'l'; longlong = l; }
+  AVSValue(__int64 l) { type = 'l'; longlong = l; }
   AVSValue(float f) { type = 'f'; floating_pt = f; }
   AVSValue(double f) { type = 'f'; floating_pt = float(f); }
   AVSValue(const char* s) { type = 's'; string = s; }
@@ -642,7 +642,7 @@ public:
   bool IsClip() const { return type == 'c'; }
   bool IsBool() const { return type == 'b'; }
   bool IsInt() const { return type == 'i'; }
-//  bool IsLong() const { return (type == 'l'|| type == 'i'); }
+  bool IsLong() const { return (type == 'l'|| type == 'i'); }
   bool IsFloat() const { return type == 'f' || type == 'i'; }
   bool IsString() const { return type == 's'; }
   bool IsArray() const { return type == 'a'; }
@@ -650,7 +650,7 @@ public:
   PClip AsClip() const { _ASSERTE(IsClip()); return IsClip()?clip:0; }
   bool AsBool() const { _ASSERTE(IsBool()); return boolean; }
   int AsInt() const { _ASSERTE(IsInt()); return integer; }
-//  int AsLong() const { _ASSERTE(IsLong()); return longlong; }
+  int AsLong() const { _ASSERTE(IsLong()); return longlong; }
   const char* AsString() const { _ASSERTE(IsString()); return IsString()?string:0; }
   double AsFloat() const { _ASSERTE(IsFloat()); return IsInt()?integer:floating_pt; }
 
@@ -677,7 +677,7 @@ private:
     float floating_pt;
     const char* string;
     const AVSValue* array;
-//    __int64 longlong;
+    __int64 longlong;
   };
 
   void Assign(const AVSValue* src, bool init) {

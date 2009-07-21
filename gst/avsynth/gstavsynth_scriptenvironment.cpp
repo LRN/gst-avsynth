@@ -365,7 +365,7 @@ ScriptEnvironment::NewVideoFrame (int row_size, int height, int align)
   vfb = GetFrameBuffer(size+(_align*4));
   if (!vfb)
     ThrowError("NewVideoFrame: Returned 0 image pointer!");
-  const int offset = (-int(vfb->GetWritePtr())) & (FRAME_ALIGN-1);  // align first line offset  (alignment is free here!)
+  const gsize offset = (-gsize(vfb->GetWritePtr())) & (FRAME_ALIGN-1);  // align first line offset  (alignment is free here!)
   return new ImplVideoFrame(vfb, offset, pitch, row_size, height);
 }
 
@@ -411,7 +411,7 @@ ScriptEnvironment::NewPlanarVideoFrame(int width, int height, int align, bool U_
     }
   }
 #endif
-  const int offset = (-int(vfb->GetWritePtr())) & (FRAME_ALIGN-1);  // align first line offset
+  const gsize offset = (-gsize(vfb->GetWritePtr())) & (FRAME_ALIGN-1);  // align first line offset
 
   if (U_first) {
     Uoffset = offset + pitch * height;

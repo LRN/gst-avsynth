@@ -372,7 +372,7 @@ AVSValue __cdecl Create_SimpleSample(AVSValue args, void* user_data, IScriptEnvi
 // The following function is the function that actually registers the filter in AviSynth
 // It is called automatically, when the plugin is loaded to see which functions this filter contains.
 
-extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit2(IScriptEnvironment* env) {
+extern "C" DECLSPEC_EXPORT const char* __stdcall AvisynthPluginInit2(IScriptEnvironment* env) {
     env->AddFunction("SimpleSample", "cc[SIZE]i", "video/x-raw-rgb; video/x-raw-yuv", "video/x-raw-rgb; video/x-raw-yuv",Create_SimpleSample, 0);
     // The AddFunction has the following paramters:
     // AddFunction(Filtername , Arguments, Caps of the input frame, Caps of the output frame, Function to call,0);

@@ -55,32 +55,16 @@ enum { AVISYNTH_INTERFACE_VERSION = 3 };
 //#include <windef.h>
 #include <stdint.h>
 #include <string.h>
+#include <glib.h>
 
 #ifndef BYTE
-typedef uint8_t BYTE;
+typedef guint8 BYTE;
 #endif
 
-#ifndef __int64
-typedef int64_t __int64;
-#endif
-
-#ifndef TRUE
-#  define TRUE 1
-#endif
-
-#ifndef FALSE
-#  define FALSE 0
-#endif
+typedef gint64 __int64;
+typedef guint64 __uint64;
 
 /* Portability macros from wine (winehq.org) LGPL licensed */
-
-#if !defined(_MSC_VER) && !defined(__int64)
-# if defined(_WIN64) && !defined(__MINGW64__)
-#   define __int64 long
-# else
-#   define __int64 long long
-# endif
-#endif
 
 #ifndef __stdcall
 # ifdef __i386__
@@ -126,19 +110,29 @@ typedef int64_t __int64;
 # endif
 #endif
 
+#ifdef _MSC_VER
+# define DECLSPEC_EXPORT __declspec(dllexport)
+#elif defined(__MINGW32__)
+# define DECLSPEC_EXPORT __attribute__((dllexport))
+#elif defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
+# define DECLSPEC_EXPORT __attribute__((visibility ("default")))
+#else
+# define DECLSPEC_EXPORT
+#endif
+
 /* End of Wine portability macros */
 
 // COM interface macros
 //#include <objbase.h>
 
 // Raster types used by VirtualDub & Avisynth
-#define in64 (__int64)(unsigned short)
-typedef unsigned long	Pixel;    // this will break on 64-bit machines!
-typedef unsigned long	Pixel32;
-typedef unsigned char	Pixel8;
-typedef long		PixCoord;
-typedef long		PixDim;
-typedef long		PixOffset;
+#define in64 (__int64)(guint16)
+typedef guint32	Pixel;
+typedef guint32	Pixel32;
+typedef guchar	Pixel8;
+typedef guint32	PixCoord;
+typedef guint32	PixDim;
+typedef guint32	PixOffset;
 
 
 /* Compiler-specific crap */
@@ -333,19 +327,19 @@ struct VideoInfo {
 
   // Range protected multiply-divide of FPS
   void MulDivFPS(unsigned multiplier, unsigned divisor) {
-    unsigned __int64 numerator = ((__int64) fps_numerator) * ((__int64) multiplier);
-    unsigned __int64 denominator = ((__int64) fps_denominator) * ((__int64) divisor);
-    //unsigned __int64 numerator   = UInt32x32To64(fps_numerator,   multiplier);
-    //unsigned __int64 denominator = UInt32x32To64(fps_denominator, divisor);
+    __uint64 numerator = ((__int64) fps_numerator) * ((__int64) multiplier);
+    __uint64 denominator = ((__int64) fps_denominator) * ((__int64) divisor);
+    //__uint64 numerator   = UInt32x32To64(fps_numerator,   multiplier);
+    //__uint64 denominator = UInt32x32To64(fps_denominator, divisor);
 
-	unsigned __int64 x=numerator, y=denominator;
+	__uint64 x=numerator, y=denominator;
 	while (y) {   // find gcd
-	  unsigned __int64 t = x%y; x = y; y = t;
+	  __uint64 t = x%y; x = y; y = t;
 	}
 	numerator   /= x; // normalize
 	denominator /= x;
 
-	unsigned __int64 temp = numerator | denominator; // Just looking top bit
+	__uint64 temp = numerator | denominator; // Just looking top bit
 	unsigned u = 0;
 	while (temp & 0xffffffff80000000LL) { // or perhaps > 16777216*2
 	  temp = temp >> 1;
@@ -625,7 +619,7 @@ public:
   AVSValue(const PClip& c) { type = 'c'; clip = c.GetPointerWithAddRef(); }
   AVSValue(bool b) { type = 'b'; boolean = b; }
   AVSValue(int i) { type = 'i'; integer = i; }
-//  AVSValue(__int64 l) { type = 'l'; longlong = l; }
+  AVSValue(__int64 l) { type = 'l'; longlong = l; }
   AVSValue(float f) { type = 'f'; floating_pt = f; }
   AVSValue(double f) { type = 'f'; floating_pt = float(f); }
   AVSValue(const char* s) { type = 's'; string = s; }
@@ -642,7 +636,7 @@ public:
   bool IsClip() const { return type == 'c'; }
   bool IsBool() const { return type == 'b'; }
   bool IsInt() const { return type == 'i'; }
-//  bool IsLong() const { return (type == 'l'|| type == 'i'); }
+  bool IsLong() const { return (type == 'l'|| type == 'i'); }
   bool IsFloat() const { return type == 'f' || type == 'i'; }
   bool IsString() const { return type == 's'; }
   bool IsArray() const { return type == 'a'; }
@@ -650,7 +644,7 @@ public:
   PClip AsClip() const { _ASSERTE(IsClip()); return IsClip()?clip:0; }
   bool AsBool() const { _ASSERTE(IsBool()); return boolean; }
   int AsInt() const { _ASSERTE(IsInt()); return integer; }
-//  int AsLong() const { _ASSERTE(IsLong()); return longlong; }
+  int AsLong() const { _ASSERTE(IsLong()); return longlong; }
   const char* AsString() const { _ASSERTE(IsString()); return IsString()?string:0; }
   double AsFloat() const { _ASSERTE(IsFloat()); return IsInt()?integer:floating_pt; }
 
@@ -677,7 +671,7 @@ private:
     float floating_pt;
     const char* string;
     const AVSValue* array;
-//    __int64 longlong;
+    __int64 longlong;
   };
 
   void Assign(const AVSValue* src, bool init) {
@@ -807,8 +801,7 @@ public:
 
   virtual char* __stdcall SaveString(const char* s, int length = -1) = 0;
   virtual char* __stdcall Sprintf(const char* fmt, ...) = 0;
-  // note: val is really a va_list; I hope everyone typedefs va_list to a pointer
-  virtual char* __stdcall VSprintf(const char* fmt, void* val) = 0;
+  virtual char* __stdcall VSprintf(const char* fmt, va_list val) = 0;
 
   DECLSPEC_NORETURN virtual void __stdcall ThrowError(const char* fmt, ...) = 0;
 

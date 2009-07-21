@@ -50,6 +50,9 @@ enum
   PROP_LAST
 };
 
+static gboolean gst_avsynth_video_filter_src_convert (GstPad * pad, GstFormat src_format, gint64 src_value,
+    GstFormat * dest_format, gint64 * dest_value);
+
 static GstElementClass *parent_class = NULL;
 
 GType

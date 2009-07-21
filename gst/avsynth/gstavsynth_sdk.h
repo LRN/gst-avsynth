@@ -110,6 +110,16 @@ typedef guint64 __uint64;
 # endif
 #endif
 
+#ifdef _MSC_VER
+# define DECLSPEC_EXPORT __declspec(dllexport)
+#elif defined(__MINGW32__)
+# define DECLSPEC_EXPORT __attribute__((dllexport))
+#elif defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
+# define DECLSPEC_EXPORT __attribute__((visibility ("default")))
+#else
+# define DECLSPEC_EXPORT
+#endif
+
 /* End of Wine portability macros */
 
 // COM interface macros

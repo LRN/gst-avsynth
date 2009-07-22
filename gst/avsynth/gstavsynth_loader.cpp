@@ -203,7 +203,7 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
       {
         /* FIXME: use more sophisticated check (suppress "not-a-dll" error messages?) */
         /* What about portability? */
-        if (g_str_has_suffix (full_filename, ".dll"))
+        if (g_str_has_suffix (full_filename, G_MODULE_SUFFIX))
         {
           GModule *plugin_module = NULL;
     

@@ -125,6 +125,14 @@ typedef guint64 __uint64;
 
 /* End of Wine portability macros */
 
+/* Windows portability macros */
+
+#ifndef OutputDebugString
+#define OutputDebugString(x) g_debug("%s", (x))
+#endif
+
+/* End of Windows portability macros */
+
 // COM interface macros
 //#include <objbase.h>
 

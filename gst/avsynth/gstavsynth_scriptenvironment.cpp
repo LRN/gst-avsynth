@@ -295,6 +295,12 @@ ScriptEnvironment::ThrowError (const char* fmt, ...)
   buf = g_strdup_vprintf (fmt, val);
   va_end(val);
 
+  /*
+   * FIXME : This should raise a GST_ERROR on the pipeline bus ! 
+   * Having filters raise errors and segfault the whole application might be
+   * considered acceptable behaviour on win32/avisynth BUT NOT IN GSTREAMER !
+   */
+
   throw AvisynthError(ScriptEnvironment::SaveString (buf));
 }
 

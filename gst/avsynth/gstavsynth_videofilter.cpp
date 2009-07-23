@@ -1986,7 +1986,7 @@ gst_avsynth_video_filter_set_property (GObject * object,
       switch (param->param_type)
       {
         case 'b':
-          *arg = AVSValue (g_value_get_boolean (value));
+          *arg = AVSValue ((bool) g_value_get_boolean (value));
           break;
         case 'i':
           *arg = AVSValue (g_value_get_int (value));
@@ -2018,13 +2018,15 @@ gst_avsynth_video_filter_get_property (GObject * object,
   for (guint i = 0; !found && i < filter_class->properties->len; i++)
   {
     AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (filter_class->properties, i);
+    GST_DEBUG ("i:%d name:%s", i, param->param_name);
+
     if (param->param_id == prop_id)
     {
       AVSValue *arg = avsynth_video_filter->args[i];
       found = TRUE;
       if (arg == NULL)
       {
-        g_value_unset (value);;
+	continue;
       }
       switch (param->param_type)
       {
@@ -2044,6 +2046,7 @@ gst_avsynth_video_filter_get_property (GObject * object,
           G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
           break;
       }
+      return;
     }
   }
   if (!found)

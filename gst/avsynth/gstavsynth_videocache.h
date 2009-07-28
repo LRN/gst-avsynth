@@ -69,6 +69,8 @@ private:
    */
   gboolean seek;
 
+  guint64 framecounter;
+
 public:
   GCond *vcache_cond;
   /* start_size defines both the size of underlying array and the number of
@@ -83,6 +85,7 @@ public:
     pad = in_pad;
     g_object_ref (pad);
     g_ptr_array_set_size (bufs, start_size);
+    framecounter = 0;
   };
 
   __stdcall ~GstAVSynthVideoCache()
@@ -114,6 +117,8 @@ public:
   void ClearUntouched();
 
   void Clear();
+
+  guint64 GetSize () { return size; };
 };
 
 #endif /* __GST_AVSYNTH_VIDEOCACHE_H__ */

@@ -46,19 +46,24 @@ G_BEGIN_DECLS
 G_END_DECLS
 #endif
 
+extern gchar *plugindir_var;
+
 ImplVideoFrameBuffer::ImplVideoFrameBuffer(): VideoFrameBuffer()
 {
+  vi = NULL;
 }
 
 ImplVideoFrameBuffer::ImplVideoFrameBuffer(int size): VideoFrameBuffer(size)
 {
   g_atomic_int_inc (&sequence_number);
+  vi = NULL;
 }
 
 ImplVideoFrameBuffer::~ImplVideoFrameBuffer() {
   _ASSERTE(refcount == 0);
   g_atomic_int_inc (&sequence_number); // HACK : Notify any children with a pointer, this buffer has changed!!!
   if (data) delete[] data;
+  if (vi) g_free (vi);
   data = 0; // and mark it invalid!!
   data_size = 0;   // and don't forget to set the size to 0 as well!
 }
@@ -514,8 +519,11 @@ void BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_
     }
 #else /* !HAVE_ORC */
     int y;
+    BYTE *dst_ptr = dstp;
+    const BYTE *src_ptr = srcp;
     for (y = height; y > 0; --y)
     {
+//      GST_WARNING ("BitBlt'ing row %d from %p (%d) to %p (%d)", y, srcp, srcp - src_ptr + row_size, dstp, dstp - dst_ptr + row_size);
       g_memmove(dstp, srcp, row_size);
       dstp += dst_pitch;
       srcp += src_pitch;
@@ -639,8 +647,11 @@ ScriptEnvironment::Invoke(const char* name, const AVSValue args, const char** ar
 AVSValue
 ScriptEnvironment::GetVar(const char* name)
 {
-  /* TODO: implement simple variable table? */
-  return NULL;
+  if (g_utf8_collate (name, "$PluginDir$") == 0)
+  {
+    return AVSValue (plugindir_var);
+  }
+  return AVSValue ();
 }
 
 bool

@@ -389,11 +389,13 @@ gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoIn
   GstVideoFormat vf;
   GstCaps *caps = NULL;
   //VideoInfo vi = NULL;
-  gint64 data_size;
+  gint data_size;
+  gint gst_data_size;
   gint offset;
   gint stride;
   gint pitch;
   gint comp_offset;
+  gint row_size;
 
   ivf = (ImplVideoFrameBuffer *) pvf->GetFrameBuffer();
 
@@ -432,8 +434,11 @@ gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoIn
   else
     caps = gst_video_format_new_caps_interlaced (vf, vi.width, vi.height, vi.fps_numerator, vi.fps_denominator,  1, 1, FALSE);
 
-  if (data_size != gst_video_format_get_size (vf, vi.width, vi.height))
-    ret = gst_buffer_try_new_and_alloc (gst_video_format_get_size (vf, vi.width, vi.height));
+  gst_data_size = gst_video_format_get_size (vf, vi.width, vi.height);
+  if (data_size != gst_data_size)
+  {
+    ret = gst_buffer_try_new_and_alloc (gst_data_size);
+  }
   else
     ret = gst_buffer_try_new_and_alloc (data_size);
 
@@ -456,13 +461,18 @@ gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoIn
 
   gst_caps_unref (caps);
 
+  for (gint64 ctr = 0; ctr < gst_data_size; ctr++)
+    GST_BUFFER_DATA (ret)[ctr] = (guint8) ctr;
+
   comp_offset = gst_video_format_get_component_offset (vf, 0, vi.width, vi.height);
-  offset = pvf->GetOffset(0);
+  offset = pvf->GetOffset(PLANAR_Y);
   stride = gst_video_format_get_row_stride (vf, 0, vi.width);
-  pitch = pvf->GetPitch(0);
+  pitch = pvf->GetPitch(PLANAR_Y);
+  row_size = pvf->GetRowSize(PLANAR_Y);
 
   filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride,
-      ivf->GetReadPtr() + offset, pitch, pvf->GetRowSize(0), vi.height);
+      pvf->GetReadPtr(PLANAR_Y)/* + offset*/, pitch, row_size, pvf->GetHeight(PLANAR_Y));
+
   if (!(gst_video_format_get_component_offset (vf, 0, vi.width, vi.height) + 
         gst_video_format_get_component_offset (vf, 1, vi.width, vi.height) +
         gst_video_format_get_component_offset (vf, 2, vi.width, vi.height) +
@@ -470,18 +480,20 @@ gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoIn
         gst_video_format_get_component_width (vf, 0, vi.width)))
   {
     comp_offset = gst_video_format_get_component_offset (vf, 1, vi.width, vi.height);
-    offset = pvf->GetOffset(1);
-    stride = gst_video_format_get_row_stride (vf, 1, vi.height);
-    pitch = pvf->GetPitch(1);
-    
-    filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride, ivf->GetReadPtr() + offset, pitch, pvf->GetRowSize(1), vi.height);
+    offset = pvf->GetOffset(PLANAR_U);
+    stride = gst_video_format_get_row_stride (vf, 1, vi.width);
+    pitch = pvf->GetPitch(PLANAR_U);
+    row_size = pvf->GetRowSize(PLANAR_U);
+
+    filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride, pvf->GetReadPtr(PLANAR_U)/* + offset*/, pitch, row_size, pvf->GetHeight(PLANAR_U));
 
     comp_offset = gst_video_format_get_component_offset (vf, 2, vi.width, vi.height);
-    offset = pvf->GetOffset(2);
-    stride = gst_video_format_get_row_stride (vf, 2, vi.height);
-    pitch = pvf->GetPitch(2);
+    offset = pvf->GetOffset(PLANAR_V);
+    stride = gst_video_format_get_row_stride (vf, 2, vi.width);
+    pitch = pvf->GetPitch(PLANAR_V);
+    row_size = pvf->GetRowSize(PLANAR_V);
     
-    filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride, ivf->GetReadPtr() + offset, pitch, pvf->GetRowSize(2), vi.height);
+    filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride, pvf->GetReadPtr(PLANAR_V)/* + offset*/, pitch, row_size, pvf->GetHeight(PLANAR_V));
   }
 
   return ret;
@@ -926,6 +938,8 @@ gst_avsynth_video_filter_framegetter (void *data)
     outbuf = gst_avsynth_ivf_to_buf (avsynth_video_filter, vf, avsynth_video_filter->vi);
 
     GST_BUFFER_OFFSET (outbuf) = avsynth_video_filter->segment.time++;
+    GST_BUFFER_TIMESTAMP (outbuf) = gst_util_uint64_scale (GST_BUFFER_OFFSET (outbuf), avsynth_video_filter->vi.fps_denominator * GST_SECOND,
+            avsynth_video_filter->vi.fps_numerator);
 
     g_mutex_unlock (avsynth_video_filter->impl_mutex);
     GST_DEBUG_OBJECT (avsynth_video_filter, "Unlocked impl_mutex");
@@ -1609,6 +1623,8 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
     }
     case GST_EVENT_NAVIGATION:
     {
+      /* forward upstream */
+      res = forward_event (avsynth_video_filter, event, FALSE);
       break;
     }
     case GST_EVENT_LATENCY:
@@ -1634,11 +1650,6 @@ done:
 
   return res;
   /* ERRORS */
-convert_error:
-  {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "could not convert format");
-    goto done;
-  }
 wrong_mode:
   {
     GST_DEBUG_OBJECT (avsynth_video_filter, "cannot perform seek when operating in pull mode");
@@ -1657,12 +1668,15 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
   gboolean ret = TRUE;
   VideoInfo *vi;
   AVSynthSink *sink = NULL;
+  gchar *caps_str;
 
   avsynth_video_filter = (GstAVSynthVideoFilter *) (gst_pad_get_parent (pad));
   oclass = (GstAVSynthVideoFilterClass *) (G_OBJECT_GET_CLASS (avsynth_video_filter));
   sink = (AVSynthSink *) g_object_get_data (G_OBJECT (pad), "sinkstruct");
 
-  GST_DEBUG_OBJECT (pad, "setcaps called");
+  caps_str = gst_caps_to_string (caps);
+  GST_DEBUG_OBJECT (pad, "Setcaps called with caps: %s", caps_str);
+  g_free (caps_str);
 
   GST_OBJECT_LOCK (avsynth_video_filter);
 
@@ -1770,8 +1784,6 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
       GstFormat dst_fmt = GST_FORMAT_DEFAULT;
       gint64 start, stop, time, dst_start, dst_stop, dst_time;
       gdouble rate, arate;
-      GstQuery *segquery;
-      GstPad* peer;
 
       gst_event_parse_new_segment_full (event, &update, &rate, &arate, &fmt,
           &start, &stop, &time);
@@ -1810,7 +1822,6 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
       break;
   }
 
-done:
   gst_object_unref (avsynth_video_filter);
 
   return ret;
@@ -1890,9 +1901,15 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
           else
             GST_ERROR ("Sink %d is negotiated, but does not have a cache attached.", sinkcount);
         }
-        else
+        else 
         {
-          arguments[i] = AVSValue ((IClip *) sink->cache);
+          /* Wait until we get some data, to know parity */
+          if (sink->cache->GetSize() > 0)
+          {
+            arguments[i] = AVSValue ((IClip *) sink->cache);
+          }
+          else
+            ready = FALSE;
         }
         if (padcaps)
           gst_caps_unref (padcaps);
@@ -1948,7 +1965,7 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
 GstStateChangeReturn
 gst_avsynth_video_filter_change_state (GstElement * element, GstStateChange transition)
 {
-  GstAVSynthVideoFilter *avsynth_video_filter = (GstAVSynthVideoFilter *) element;
+//  GstAVSynthVideoFilter *avsynth_video_filter = (GstAVSynthVideoFilter *) element;
   GstStateChangeReturn ret;
 
   ret = GST_ELEMENT_CLASS (parent_class)->change_state (element, transition);

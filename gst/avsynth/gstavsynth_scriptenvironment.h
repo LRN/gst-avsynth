@@ -71,6 +71,10 @@ public:
   gboolean touched;
   /* Frame index */
   guint64 selfindex;
+  /* For debugging */
+  guint64 countindex;
+
+  VideoInfo *vi;
 
   ImplVideoFrameBuffer(int size);
   ImplVideoFrameBuffer();

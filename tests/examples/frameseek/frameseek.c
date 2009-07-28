@@ -43,7 +43,7 @@ gint64 duration;
 void
 handoff (GstElement *fakesink, GstBuffer *buffer, GstPad *pad, gpointer user_data)
 {
-  gchar *filename;
+  gchar *filename, *timestr, *timeptr;
   static gint64 counter = 0;
   gint width, height;
   GdkPixbuf *pb;
@@ -54,8 +54,15 @@ handoff (GstElement *fakesink, GstBuffer *buffer, GstPad *pad, gpointer user_dat
   size = gst_caps_get_size (caps);
 
   g_print ("Dumping frame %" G_GUINT64_FORMAT "\n", GST_BUFFER_OFFSET (buffer));
-/*
-  filename = g_strdup_printf ("f:/dump/counter(%08" G_GINT64_FORMAT ")_frame(%08" G_GUINT64_FORMAT ").png", counter++, GST_BUFFER_OFFSET (buffer));
+
+  timestr = g_strdup_printf ("%" GST_TIME_FORMAT, GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (buffer)));
+  for (timeptr = timestr; *timeptr; timeptr++)
+    if (*timeptr == ':')
+      *timeptr = '_';
+
+  filename = g_strdup_printf ("f:/dump/counter(%08" G_GINT64_FORMAT ")_frame(%08" G_GUINT64_FORMAT ")_ts(%s).png", counter++, GST_BUFFER_OFFSET (buffer), timestr);
+
+  g_free (timestr);
 
   if (size == 1)
   {
@@ -82,7 +89,7 @@ handoff (GstElement *fakesink, GstBuffer *buffer, GstPad *pad, gpointer user_dat
     }
   }
   g_free (filename);
-*/  
+  
   gst_caps_unref (caps);
   if (duration == 0)
   {

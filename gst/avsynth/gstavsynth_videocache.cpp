@@ -28,14 +28,29 @@ gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *c
   gint width = 0, height = 0;
   gboolean interlaced;
   GstFormat qfmt = GST_FORMAT_DEFAULT;
-  gint64 duration = 0;
+  gint64 duration = -1, time_duration = -1;
  
-  if (pad)
-    ret = ret && gst_pad_query_peer_duration (pad, &qfmt, &duration);
- 
-  ret = ret && gst_video_format_parse_caps (caps, &vf, &width, &height);
-  ret = ret && gst_video_format_parse_caps_interlaced (caps, &interlaced);
-  ret = ret && gst_video_parse_caps_framerate (caps, &fps_num, &fps_den);
+
+  ret = gst_video_format_parse_caps (caps, &vf, &width, &height);
+  if (!ret)
+  {
+    GST_ERROR ("Failed to convert caps to videoinfo - can't get format/width/height");
+    goto cleanup;
+  }
+  ret = gst_video_format_parse_caps_interlaced (caps, &interlaced);
+  if (!ret)
+  {
+    GST_ERROR ("Failed to convert caps to videoinfo - can't get interlaced state");
+    goto cleanup;
+  }
+
+  ret = gst_video_parse_caps_framerate (caps, &fps_num, &fps_den);
+  if (!ret)
+  {
+    GST_ERROR ("Failed to convert caps to videoinfo - can't get fps");
+    goto cleanup;
+  }
+
 
   if (!ret)
   {
@@ -78,6 +93,57 @@ gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *c
   vi->fps_denominator = fps_den;
   vi->width = width;
   vi->height = height;
+
+  if (pad)
+  {
+    ret = gst_pad_query_peer_duration (pad, &qfmt, &duration);
+    if (!ret)
+    {
+      GST_WARNING ("Failed to get duration in default format");
+      qfmt = GST_FORMAT_TIME;
+      ret = gst_pad_query_peer_duration (pad, &qfmt, &time_duration);
+      if (!ret)
+      {
+        GST_WARNING ("Failed to get duration in time format");
+        duration = -1;
+      }
+      else
+      {
+        GstPad *peer = gst_pad_get_peer (pad);
+        if (peer)
+        {
+          qfmt = GST_FORMAT_DEFAULT;
+          if (!gst_pad_query_convert (peer, GST_FORMAT_TIME, time_duration, &qfmt, &duration))
+          {
+            GST_WARNING ("Failed to convert duration from time format to default format");
+            gst_object_unref (peer);
+            peer = NULL;
+          }
+          else
+            gst_object_unref (peer);
+          if (peer == NULL)
+          {
+            duration = gst_util_uint64_scale (time_duration, vi->fps_numerator,
+                vi->fps_denominator * GST_SECOND);
+            /* Attempt to round to nearest integer: if the difference is more
+             * than 0.5 (less than -0.5), it means that gst_util_uint64_scale()
+             * just truncated an integer, while it had to be rounded
+             */
+    
+            duration = duration * GST_SECOND - 
+                time_duration * vi->fps_numerator / vi->fps_denominator <= 
+                -0.5 ? duration + 1: duration;
+          }
+        }
+      }
+    }
+  
+    if (duration <= -1)
+    {
+      GST_WARNING ("Reporting duration as -1, may break some filters");
+    }
+  }
+
   vi->num_frames = duration;
 
 cleanup:
@@ -91,9 +157,11 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
   ImplVideoFrameBuffer *ivf;
   AVSynthSink *sink;
 
+  gboolean ret = TRUE;
+
   guint8 *in_data;
   guint in_size;
-  GstClockTime in_timestamp, in_duration;
+  GstClockTime in_timestamp, in_duration, in_running_time;
   guint64 in_offset;
   GstVideoFormat vf;
   gint in_stride0, in_stride1, in_stride2;
@@ -111,6 +179,64 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
 
   GST_DEBUG ("Video cache %p: locking sinkmutex", (gpointer) this);
   g_mutex_lock (sink->sinkmutex);
+
+  in_running_time = gst_segment_to_running_time (&sink->segment, GST_FORMAT_TIME, in_timestamp);
+
+  if (G_UNLIKELY (sink->first_ts == GST_CLOCK_TIME_NONE && in_timestamp != GST_CLOCK_TIME_NONE))
+  {
+    sink->first_ts = in_timestamp;
+  }
+
+  /* Offset voodoo magic */
+  /* No offset on incoming frame */
+  if (in_offset == -1)
+  {
+    /* Do we know offset of the previous frame? */
+    if (sink->last_offset > -1)
+    {
+      in_offset = sink->last_offset + 1;
+    }
+    else
+    {
+      /* Try to convert timestamp to offset */
+      if (in_timestamp >= 0 && in_running_time >= 0)
+      {
+        in_offset = gst_util_uint64_scale (in_running_time - sink->first_ts, vi.fps_numerator,
+            vi.fps_denominator * GST_SECOND);
+        /* Attempt to round to nearest integer: if the difference is more
+         * than 0.5 (less than -0.5), it means that gst_util_uint64_scale()
+         * just truncated an integer, while it had to be rounded
+         */
+
+        in_offset = in_offset * GST_SECOND - 
+            in_running_time * vi.fps_numerator / vi.fps_denominator <= 
+            -0.5 ? in_offset + 1: in_offset;
+      }
+      else
+      {
+        GST_ERROR ("Video cache %p: frame offset is unknown", (gpointer) this);
+        ret = FALSE;
+        goto end;
+      }
+    }
+  }
+  /* Offset sanity check */
+  if (sink->last_offset > -1)
+  {
+    /* Non-monotonic offsets */
+    if (in_offset < sink->last_offset || in_offset > sink->last_offset + 1)
+    {
+      GST_WARNING ("Video cache %p: last offset was %" G_GUINT64_FORMAT ", current offset is %" G_GUINT64_FORMAT " - shouldn't it be %" G_GUINT64_FORMAT "?", sink->last_offset, in_offset, sink->last_offset + 1);
+      in_offset = sink->last_offset + 1;
+    }
+    else if (in_offset == sink->last_offset)
+    {
+      GST_WARNING ("Video cache %p: duplicate offsets %" G_GUINT64_FORMAT ", dropping", (gpointer) this, in_offset);
+      goto end;
+    }
+  }
+
+  sink->last_offset = in_offset;
 
   if (size >= used_size && !sink->flush)
   {
@@ -190,6 +316,9 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
   ivf = (ImplVideoFrameBuffer *) ((*buf_ptr)->GetFrameBuffer());
   ivf->touched = FALSE;
   ivf->selfindex = in_offset;
+  ivf->countindex = framecounter++;
+  ivf->vi = g_new0 (VideoInfo, 1);
+  memcpy (ivf->vi, &vi, sizeof (VideoInfo));
 
 
   /* Buffer is full, meaning that a filter is not processing frames
@@ -229,7 +358,7 @@ end:
  
   GST_DEBUG ("Video cache %p: unlocked sinkmutex", (gpointer) this);
 
-  return TRUE;
+  return ret;
 
 }
 
@@ -400,9 +529,11 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
   {
     ret = (PVideoFrame *) g_ptr_array_index (bufs, n - rng_from);
     ivf = (ImplVideoFrameBuffer *) (*ret)->GetFrameBuffer();
-    GST_DEBUG ("Video cache %p: touching and returning frame %" G_GUINT64_FORMAT ", its calculated index is %" G_GUINT64_FORMAT", self index is %" G_GUINT64_FORMAT", %p (%p)", (gpointer) this, n, store_rng + (n - rng_from), ivf->selfindex, ivf, ret);
+    GST_DEBUG ("Video cache %p: touching and returning frame %" G_GUINT64_FORMAT ", its calculated index is %" G_GUINT64_FORMAT", self index is %" G_GUINT64_FORMAT", it's %" G_GUINT64_FORMAT "'th frame, %p (%p)", (gpointer) this, n, store_rng + (n - rng_from), ivf->selfindex, ivf->countindex, ivf, ret);
+/*
     if (n != ivf->selfindex)
       GST_ERROR ("Video cache %p: returning wrong frame: %" G_GUINT64_FORMAT" != %" G_GUINT64_FORMAT, (gpointer) this, n, ivf->selfindex);
+*/
     ivf->touched = TRUE;
   }
   else
@@ -430,9 +561,41 @@ GstAVSynthVideoCache::GetFrame(int in_n, IScriptEnvironment* env)
 }
 
 bool __stdcall
-GstAVSynthVideoCache::GetParity(int n)
+GstAVSynthVideoCache::GetParity(int in_n)
 {
-  /* FIXME: return something meaningful */
+  PVideoFrame *pvf = NULL;
+  ImplVideoFrameBuffer *ivf;
+  guint64 n;
+  AVSynthSink *sink;
+
+  sink = (AVSynthSink *) g_object_get_data (G_OBJECT (pad), "sinkstruct");
+
+  GST_DEBUG ("Video cache %p: locking sinkmutex", (gpointer) this);
+  g_mutex_lock (sink->sinkmutex);
+
+  /* Make sure 0 >= n < num_frames, but only if duration is known */
+  if (vi.num_frames >= 0)
+  {
+    n = MIN (vi.num_frames - 1, MAX (0, in_n));
+  }
+  else
+    n = in_n;
+
+  if (n >= rng_from && rng_from + size > n)
+  {
+    pvf = (PVideoFrame *) g_ptr_array_index (bufs, n - rng_from);
+    ivf = (ImplVideoFrameBuffer *) (*pvf)->GetFrameBuffer();
+  }
+
+  g_mutex_unlock (sink->sinkmutex);
+
+  GST_DEBUG ("Video cache %p: unlocked sinkmutex", (gpointer) this);
+
+  if (ivf)
+    return ivf->vi->IsTFF();
+  else
+    throw AvisynthError("Asked parity of a frame not yet in the cache");
+
   return false;
 }
 

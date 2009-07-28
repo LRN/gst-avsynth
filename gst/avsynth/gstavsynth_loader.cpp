@@ -36,6 +36,8 @@
 #include "gstavsynth_videofilter.h"
 #include "gstavsynth_loader.h"
 
+gchar *plugindir_var = NULL;
+
 const gchar *gst_avsynth_get_plugin_directory()
 {
   return AVSYNTHPLUGINDIR;
@@ -157,10 +159,18 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
   if (plugindirs)
     a_plugindirs = g_strsplit_set (plugindirs, ";", -1);
 
-  for (i_plugindirs = a_plugindirs; i_plugindirs != NULL && *i_plugindirs != NULL; ++i_plugindirs) {
+  for (i_plugindirs = a_plugindirs; i_plugindirs != NULL; ++i_plugindirs) {
     gchar *plugin_dir_name = NULL;
     const gchar *filename = NULL;
     const gchar *plugin_dir_name_utf8 = *i_plugindirs;
+
+    if (*i_plugindirs == NULL)
+    {
+      i_plugindirs--;
+      if (plugindir_var == NULL)
+        plugindir_var = g_strdup_printf ("%s", g_filename_from_utf8 (*i_plugindirs, -1, NULL, NULL, NULL));
+      break;
+    }
 
     if (!(plugin_dir_name = g_filename_from_utf8 (plugin_dir_name_utf8, -1, NULL, NULL, NULL)))
     {

@@ -65,7 +65,7 @@ struct AVSynthSink
   /* TRUE if we've got EOS on this pad (set to FALSE on newsegment) */
   gboolean eos;
 
-  /* TRUE if we've got EOS and cache is empied too */
+  /* TRUE if we've got EOS and cache is emptied too */
   gboolean starving;
 
   /* TRUE if we're flushing */
@@ -78,7 +78,7 @@ struct AVSynthSink
   gboolean seeking;
 
   /* If seek is TRUE, seek to this frame or earlier */
-  gint64 seekhint;
+  guint64 seekhint;
 
   GMutex *sinkmutex;
 
@@ -97,6 +97,12 @@ struct AVSynthSink
   gint64 minframeshift;
 
   gint64 maxframeshift;
+
+  /* Offset of a last frame we've got. Used to interpolate offsets */
+  gint64 last_offset;
+
+  /* Timestamp of the first frame we've got. Sometimes it's not 0 */
+  gint64 first_ts;
 };
 
 struct _GstAVSynthVideoFilter

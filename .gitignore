@@ -40,3 +40,4 @@ gst-avsynth-*.tar*
 /m4
 Makefile.in
 Makefile
+*.exe

@@ -400,6 +400,15 @@ protected:
   // sequence_number is incremented every time the buffer is changed, so
   // that stale views can tell they're no longer valid.
   int sequence_number;
+  /* GstAVSynth-specific: timestamps of the frame. May be optionally used by
+   * a filter to set timestamps of the resulting frames
+   */
+  guint64 timestamp;
+
+  /* GstAVSynth-specific: parity (as in VideoInfo). GStreamer allows you to
+   * get parity of a frame directly from that frame.
+   */
+  int image_type;
 
   friend class VideoFrame;
   friend class Cache;
@@ -416,6 +425,12 @@ public:
   int GetDataSize() { return data_size; }
   int GetSequenceNumber() { return sequence_number; }
   int GetRefcount() { return refcount; }
+
+  guint64 GetTimestamp() { return timestamp; }
+  void SetTimestamp(guint64 newts) { timestamp = newts; }
+
+  int GetParity() { return image_type; }
+  void SetParity(int newparity) { image_type = newparity; }
 };
 
 
@@ -515,6 +530,12 @@ public:
     }
     return vfb->data + GetOffset(plane);
   }
+
+  guint64 GetTimestamp() { return vfb->GetTimestamp(); }
+  void SetTimestamp(guint64 newts) { vfb->SetTimestamp(newts); }
+
+  int GetParity() { return vfb->GetParity(); }
+  void SetParity(int newparity) { vfb->SetParity(newparity); }
 
   virtual ~VideoFrame() {};
 };
@@ -827,7 +848,15 @@ public:
   typedef AVSValue (__cdecl *ApplyFunc)(AVSValue args, void* user_data, IScriptEnvironment* env);
 
 
-  virtual void __stdcall AddFunction(const char* name, const char* paramstr, const char* srccapstr, const char* sinkcapstr, ApplyFunc apply, void* user_data=0) = 0;
+  virtual void __stdcall AddFunction(const char* name, const char* paramstr,
+/* GstAVSynth-specific:
+ * srccapstr - describes what kind of input the filter supports
+ * sinkcapstr - describes what kind of output the filter may output
+ * default is "video/x-raw-yuv; video/x-raw-rgb" - accept practially any video.
+ * See GStreamer documentation for further explanation
+ */
+      const char* srccapstr, const char* sinkcapstr,
+      ApplyFunc apply, void* user_data=0) = 0;
   virtual bool __stdcall FunctionExists(const char* name) = 0;
   virtual AVSValue __stdcall Invoke(const char* name, const AVSValue args, const char** arg_names=0) = 0;
 

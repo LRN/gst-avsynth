@@ -109,6 +109,11 @@ PVideoFrame __stdcall SimpleSample::GetFrame(int n, IScriptEnvironment* env) {
   PVideoFrame dst = env->NewVideoFrame(vi);
    // Construct a frame based on the information of the current frame
    // contained in the "vi" struct.
+
+  /* GstAVSynth: copy timestamp from source to destination buffer
+   * without modifying it
+   */
+  dst->SetTimestamp (src->GetTimestamp ());
   
   const unsigned char* srcp = src->GetReadPtr();
   // Request a Read pointer from the source frame.

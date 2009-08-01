@@ -241,6 +241,7 @@ gboolean gst_avsynth_video_filter_negotiate (GstAVSynthVideoFilter * avsynth_vid
 
 gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *caps, VideoInfo *vi);
 
+gint64 gst_avsynth_query_duration (GstPad *pad, VideoInfo *vi);
 
 G_END_DECLS
 

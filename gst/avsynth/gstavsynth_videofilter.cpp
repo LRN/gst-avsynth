@@ -333,11 +333,11 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
           break;
         case 'i':
           paramspec = g_param_spec_int (paramname, "", "",
-              G_MININT, G_MAXINT, G_MININT, paramflags);
+              G_MININT, G_MAXINT, 0, paramflags);
           break;
         case 'f':
           paramspec = g_param_spec_float (paramname, "", "",
-              G_MINFLOAT, G_MAXFLOAT, G_MINFLOAT, paramflags);
+              -G_MINFLOAT, G_MAXFLOAT, 0, paramflags);
           break;
         case 'c':
           break;
@@ -378,6 +378,64 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
   }
 
   gstelement_class->change_state = gst_avsynth_video_filter_change_state;
+}
+
+gint64
+gst_avsynth_query_duration (GstPad *pad, VideoInfo *vi)
+{
+  gint64 duration = -1, time_duration = -1;
+  gboolean ret;
+  GstFormat qfmt = GST_FORMAT_DEFAULT;
+  if (pad)
+  {
+    ret = gst_pad_query_peer_duration (pad, &qfmt, &duration);
+    if (!ret)
+    {
+      GST_INFO ("Failed to get duration in default format");
+      qfmt = GST_FORMAT_TIME;
+      ret = gst_pad_query_peer_duration (pad, &qfmt, &time_duration);
+      if (!ret)
+      {
+        GST_INFO ("Failed to get duration in time format");
+        duration = -1;
+      }
+      else
+      {
+        GstPad *peer = gst_pad_get_peer (pad);
+        if (peer)
+        {
+          qfmt = GST_FORMAT_DEFAULT;
+          if (!gst_pad_query_convert (peer, GST_FORMAT_TIME, time_duration, &qfmt, &duration))
+          {
+            GST_WARNING ("Failed to convert duration from time format to default format");
+            gst_object_unref (peer);
+            peer = NULL;
+          }
+          else
+            gst_object_unref (peer);
+          if (peer == NULL)
+          {
+            duration = gst_util_uint64_scale (time_duration, vi->fps_numerator,
+                vi->fps_denominator * GST_SECOND);
+            /* Attempt to round to nearest integer: if the difference is more
+             * than 0.5 (less than -0.5), it means that gst_util_uint64_scale()
+             * just truncated an integer, while it had to be rounded
+             */
+    
+            duration = duration * GST_SECOND - 
+                time_duration * vi->fps_numerator / vi->fps_denominator <= 
+                -0.5 ? duration + 1: duration;
+          }
+        }
+      }
+    }
+  
+    if (duration <= -1)
+    {
+      GST_WARNING ("Reporting duration as -1, may break some filters");
+    }
+  }
+  return duration;
 }
 
 
@@ -792,7 +850,7 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
     /* for deriving a stop position for the playback segment from the seek
      * segment, we must take the duration when the stop is not set */
 /*
-    if ((stop = avsynth_video_filter->segment.stop) == -1)
+    if ((stop = avsynth_video_filter->segment.stop) == GST_CLOCK_TIME_NONE)
       stop = avsynth_video_filter->segment.duration;
 
     GST_DEBUG_OBJECT (avsynth_video_filter, "Sending newsegment from %" G_GINT64_FORMAT
@@ -938,8 +996,11 @@ gst_avsynth_video_filter_framegetter (void *data)
     outbuf = gst_avsynth_ivf_to_buf (avsynth_video_filter, vf, avsynth_video_filter->vi);
 
     GST_BUFFER_OFFSET (outbuf) = avsynth_video_filter->segment.time++;
+    GST_BUFFER_TIMESTAMP (outbuf) = vf->GetTimestamp();
+#if 0
     GST_BUFFER_TIMESTAMP (outbuf) = gst_util_uint64_scale (GST_BUFFER_OFFSET (outbuf), avsynth_video_filter->vi.fps_denominator * GST_SECOND,
             avsynth_video_filter->vi.fps_numerator);
+#endif
 
     g_mutex_unlock (avsynth_video_filter->impl_mutex);
     GST_DEBUG_OBJECT (avsynth_video_filter, "Unlocked impl_mutex");
@@ -987,10 +1048,18 @@ gst_avsynth_video_filter_framegetter (void *data)
       gint64 stop_pos;
       GstEvent *newsegevent;
       avsynth_video_filter->newsegment = FALSE;
+      if (avsynth_video_filter->seeksegment.start == GST_CLOCK_TIME_NONE)
+      {
+        avsynth_video_filter->seeksegment.duration = avsynth_video_filter->vi.num_frames;
+        /*We've just started the playback, send new segment before data */
+        gst_segment_set_newsegment_full (&avsynth_video_filter->seeksegment,
+            TRUE, 1.0, 1.0, GST_FORMAT_DEFAULT, GST_BUFFER_OFFSET (outbuf),
+            -1, GST_BUFFER_OFFSET (outbuf));
+      }
       avsynth_video_filter->segment = avsynth_video_filter->seeksegment;
       /* for deriving a stop position for the playback segment from the seek
        * segment, we must take the duration when stop is not set */
-      if ((stop_pos= avsynth_video_filter->segment.stop) == -1)
+      if ((stop_pos= avsynth_video_filter->segment.stop) == GST_CLOCK_TIME_NONE)
         stop_pos = avsynth_video_filter->segment.duration;
   
       GST_DEBUG_OBJECT (avsynth_video_filter, "Sending newsegment from %"
@@ -1064,7 +1133,7 @@ gst_avsynth_video_filter_framegetter (void *data)
       gst_buffer_unref (outbuf);
       continue;
     }
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Pushing frame %" G_GUINT64_FORMAT" downstream, clip_start = %" G_GINT64_FORMAT, GST_BUFFER_OFFSET (outbuf), clip_start);
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Pushing frame %" G_GUINT64_FORMAT" downstream, clip_start = %" G_GINT64_FORMAT ", ts = %" GST_TIME_FORMAT, GST_BUFFER_OFFSET (outbuf), clip_start, GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (outbuf)));
     gst_pad_push (avsynth_video_filter->srcpad, outbuf);
 
     /* For debuggnig *//*
@@ -1260,11 +1329,16 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
 
   avsynth_video_filter->uninitialized = TRUE;
 
+  avsynth_video_filter->seeksegment.time = GST_CLOCK_TIME_NONE;
+  avsynth_video_filter->seeksegment.start = GST_CLOCK_TIME_NONE;
   avsynth_video_filter->segment.time = 0;
+  avsynth_video_filter->segment.start = 0;
 
   avsynth_video_filter->eos = FALSE;
 
   avsynth_video_filter->seek_event = NULL;
+
+  avsynth_video_filter->newsegment = TRUE;
 }
 
 void
@@ -1277,6 +1351,92 @@ gst_avsynth_video_filter_finalize (GObject * object)
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
+
+static gboolean
+gst_avsynth_video_filter_latency (GstAVSynthVideoFilter* filter, GstQuery * query)
+{
+  GstClockTime min, max;
+  gboolean live;
+  gboolean res;
+  GstIterator *it;
+  gboolean done;
+
+  res = TRUE;
+  done = FALSE;
+
+  live = FALSE;
+  min = 0;
+  max = GST_CLOCK_TIME_NONE;
+
+  /* Take maximum of all latency values */
+  it = gst_element_iterate_sink_pads (GST_ELEMENT_CAST (filter));
+  while (!done) {
+    GstIteratorResult ires;
+
+    gpointer item;
+
+    ires = gst_iterator_next (it, &item);
+    switch (ires) {
+      case GST_ITERATOR_DONE:
+        done = TRUE;
+        break;
+      case GST_ITERATOR_OK:
+      {
+        GstPad *pad = GST_PAD_CAST (item);
+        GstQuery *peerquery;
+        GstClockTime min_cur, max_cur;
+        gboolean live_cur;
+
+        peerquery = gst_query_new_latency ();
+
+        /* Ask peer for latency */
+        res &= gst_pad_peer_query (pad, peerquery);
+
+        /* take max from all valid return values */
+        if (res) {
+          gst_query_parse_latency (peerquery, &live_cur, &min_cur, &max_cur);
+
+          if (min_cur > min)
+            min = min_cur;
+
+          if (max_cur != GST_CLOCK_TIME_NONE &&
+              ((max != GST_CLOCK_TIME_NONE && max_cur > max) ||
+                  (max == GST_CLOCK_TIME_NONE)))
+            max = max_cur;
+
+          live = live || live_cur;
+        }
+
+        gst_query_unref (peerquery);
+        gst_object_unref (pad);
+        break;
+      }
+      case GST_ITERATOR_RESYNC:
+        live = FALSE;
+        min = 0;
+        max = GST_CLOCK_TIME_NONE;
+        res = TRUE;
+        gst_iterator_resync (it);
+        break;
+      default:
+        res = FALSE;
+        done = TRUE;
+        break;
+    }
+  }
+  gst_iterator_free (it);
+
+  if (res) {
+    /* store the results */
+    GST_DEBUG_OBJECT (filter, "Calculated total latency: live %s, min %"
+        GST_TIME_FORMAT ", max %" GST_TIME_FORMAT,
+        (live ? "yes" : "no"), GST_TIME_ARGS (min), GST_TIME_ARGS (max));
+    gst_query_set_latency (query, live, min, max);
+  }
+
+  return res;
+}
+
 
 gboolean
 gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
@@ -1402,6 +1562,9 @@ gst_avsynth_video_filter_query (GstPad * pad, GstQuery * query)
               &dest_fmt, &dest_val)))
         gst_query_set_convert (query, src_fmt, src_val, dest_fmt, dest_val);
     }
+    case GST_QUERY_LATENCY:
+      res = gst_avsynth_video_filter_latency (avsynth_video_filter, query);
+      break;
     default:
       res = FALSE;
   }
@@ -1625,10 +1788,14 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
     {
       /* forward upstream */
       res = forward_event (avsynth_video_filter, event, FALSE);
+      event = NULL;
       break;
     }
     case GST_EVENT_LATENCY:
     {
+      /* forward upstream */
+      res = forward_event (avsynth_video_filter, event, FALSE);
+      event = NULL;
       break;
     }
     case GST_EVENT_STEP:
@@ -1638,6 +1805,7 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
     default:
       /* forward upstream */
       res = forward_event (avsynth_video_filter, event, FALSE);
+      event = NULL;
       break;
   }
 done:
@@ -1796,9 +1964,9 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
               arate, fmt, start, stop, time);
           break;
         default:
-          if ((start == -1 || gst_pad_query_peer_convert (pad, fmt, start, &dst_fmt, &dst_start)) &&
-              (stop == -1 || gst_pad_query_peer_convert (pad, fmt, stop, &dst_fmt, &dst_stop)) &&
-              (time == -1 || gst_pad_query_peer_convert (pad, fmt, time, &dst_fmt, &dst_time)))
+          if ((start == GST_CLOCK_TIME_NONE || gst_pad_query_peer_convert (pad, fmt, start, &dst_fmt, &dst_start)) &&
+              (stop == GST_CLOCK_TIME_NONE || gst_pad_query_peer_convert (pad, fmt, stop, &dst_fmt, &dst_stop)) &&
+              (time == GST_CLOCK_TIME_NONE || gst_pad_query_peer_convert (pad, fmt, time, &dst_fmt, &dst_time)))
           {
             gst_segment_set_newsegment_full (&sink->defsegment, update, rate,
                 arate, dst_fmt, dst_start, dst_stop, dst_time);

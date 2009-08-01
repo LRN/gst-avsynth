@@ -134,6 +134,8 @@ PVideoFrame Telecide::GetFrame(int frame, IScriptEnvironment* env)
 	hplus1over2 = (h+1)/2;
 	hminus2= h - 2;
 	dst = env->NewVideoFrame(vi);
+        /* GstAVSynth: preserve timestamps */
+        dst->SetTimestamp (fc->GetTimestamp());
 	dpitch = dst->GetPitch(PLANAR_Y);
 
 	// Ensure that the metrics for the frames
@@ -511,6 +513,10 @@ PVideoFrame Telecide::GetFrame(int frame, IScriptEnvironment* env)
 		{
 			// Blend mode.
 			final = env->NewVideoFrame(vi);
+
+		        /* GstAVSynth: preserve timestamps */
+		        final->SetTimestamp (fc->GetTimestamp());
+
 			// Do first and last lines.
 			finalp = final->GetWritePtr(PLANAR_Y);
 			dstp = dst->GetWritePtr(PLANAR_Y);

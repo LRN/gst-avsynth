@@ -51,13 +51,6 @@ gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *c
     goto cleanup;
   }
 
-
-  if (!ret)
-  {
-    GST_ERROR ("Failed to convert caps to videoinfo");
-    goto cleanup;
-  }
-
   /* FIXME: What about true 24-bit BGR? */
   switch (vf)
   {
@@ -94,55 +87,7 @@ gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *c
   vi->width = width;
   vi->height = height;
 
-  if (pad)
-  {
-    ret = gst_pad_query_peer_duration (pad, &qfmt, &duration);
-    if (!ret)
-    {
-      GST_WARNING ("Failed to get duration in default format");
-      qfmt = GST_FORMAT_TIME;
-      ret = gst_pad_query_peer_duration (pad, &qfmt, &time_duration);
-      if (!ret)
-      {
-        GST_WARNING ("Failed to get duration in time format");
-        duration = -1;
-      }
-      else
-      {
-        GstPad *peer = gst_pad_get_peer (pad);
-        if (peer)
-        {
-          qfmt = GST_FORMAT_DEFAULT;
-          if (!gst_pad_query_convert (peer, GST_FORMAT_TIME, time_duration, &qfmt, &duration))
-          {
-            GST_WARNING ("Failed to convert duration from time format to default format");
-            gst_object_unref (peer);
-            peer = NULL;
-          }
-          else
-            gst_object_unref (peer);
-          if (peer == NULL)
-          {
-            duration = gst_util_uint64_scale (time_duration, vi->fps_numerator,
-                vi->fps_denominator * GST_SECOND);
-            /* Attempt to round to nearest integer: if the difference is more
-             * than 0.5 (less than -0.5), it means that gst_util_uint64_scale()
-             * just truncated an integer, while it had to be rounded
-             */
-    
-            duration = duration * GST_SECOND - 
-                time_duration * vi->fps_numerator / vi->fps_denominator <= 
-                -0.5 ? duration + 1: duration;
-          }
-        }
-      }
-    }
-  
-    if (duration <= -1)
-    {
-      GST_WARNING ("Reporting duration as -1, may break some filters");
-    }
-  }
+  duration = gst_avsynth_query_duration (pad, vi);
 
   vi->num_frames = duration;
 
@@ -317,6 +262,8 @@ GstAVSynthVideoCache::AddBuffer (GstPad *pad, GstBuffer *inbuf, ScriptEnvironmen
   ivf->touched = FALSE;
   ivf->selfindex = in_offset;
   ivf->countindex = framecounter++;
+  (*buf_ptr)->SetTimestamp (in_timestamp);
+  (*buf_ptr)->SetParity (vi.image_type);
   ivf->vi = g_new0 (VideoInfo, 1);
   memcpy (ivf->vi, &vi, sizeof (VideoInfo));
 

@@ -122,6 +122,7 @@ void Decimate::DrawShow(PVideoFrame &src, int useframe, bool forced, int dropfra
 
 PVideoFrame __stdcall Decimate::GetFrame(int inframe, IScriptEnvironment* env)
 {
+        /* FIXME: pass frame numbers from input buffers to output buffers */
 	if (vi.IsYV12()) return(GetFrameYV12(inframe, env));
 	else if (vi.IsYUY2()) return(GetFrameYUY2(inframe, env));
 	env->ThrowError("Decimate: YUY2 or YV12 data only");

@@ -279,6 +279,8 @@ int interpolateYUY2(const unsigned char *dstp, const unsigned char *cprev,
 
 	/* Frame is combed or user wants all frames, so deinterlace. */
 	PVideoFrame final = env->NewVideoFrame(vi);
+        /* GstAVSynth: preserve timestamps */
+        final->SetTimestamp (src->GetTimestamp());
 
 	srcp = srcp_saved;
 	dmaskp = dmaskp_saved;

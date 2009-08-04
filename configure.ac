@@ -281,6 +281,7 @@ gst/avsynth/Makefile
 filters/Makefile
 filters/testfilter/Makefile
 filters/decomb/Makefile
+filters/yadif/Makefile
 common/Makefile
 common/m4/Makefile
 tests/Makefile

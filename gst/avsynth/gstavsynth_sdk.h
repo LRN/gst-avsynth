@@ -394,12 +394,14 @@ struct VideoInfo {
 class VideoFrameBuffer {
 
 protected:
-  int refcount;
   BYTE* data;
   int data_size;
   // sequence_number is incremented every time the buffer is changed, so
   // that stale views can tell they're no longer valid.
   int sequence_number;
+
+  int refcount;
+
   /* GstAVSynth-specific: timestamps of the frame. May be optionally used by
    * a filter to set timestamps of the resulting frames
    */
@@ -407,6 +409,10 @@ protected:
 
   /* GstAVSynth-specific: parity (as in VideoInfo). GStreamer allows you to
    * get parity of a frame directly from that frame.
+   * GstAVSynth never makes a global assumption about video frame parity
+   * that is applies to all frames. You can emulate that behaivour by
+   * forcing GStreamer to set parity of each frame to the desired value
+   * (which is equivalent to AssumeTFF() or AssumeBFF())
    */
   int image_type;
 
@@ -415,8 +421,8 @@ protected:
   friend class ScriptEnvironment;
 
 public:
-  VideoFrameBuffer(int size): refcount(0), data(new BYTE[size]), data_size(data ? size : 0), sequence_number(0) {};
-  VideoFrameBuffer(): refcount (0), data(0), data_size(0), sequence_number(0) {};
+  VideoFrameBuffer(int size): data(new BYTE[size]), data_size(data ? size : 0), sequence_number(0), refcount(0), timestamp(0), image_type(0) {};
+  VideoFrameBuffer(): data(0), data_size(0), sequence_number(0), refcount (0), timestamp(0), image_type(0) {};
 
   virtual ~VideoFrameBuffer() {};
 

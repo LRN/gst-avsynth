@@ -1,2 +1,2 @@
-SUBDIRS = testfilter decomb
-DIST_SUBDIRS = testfilter decomb
+SUBDIRS = testfilter decomb yadif
+DIST_SUBDIRS = testfilter decomb yadif

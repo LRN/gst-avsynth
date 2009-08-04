@@ -19,7 +19,7 @@ plugin_LTLIBRARIES = libgstavsynth.la
 ##############################################################################
 
 # sources used to compile this plug-in
-libgstavsynth_la_SOURCES = gstavsynth.c gstavsynth_loader.cpp gstavsynth_videofilter.cpp gstavsynth_scriptenvironment.cpp gstavsynth_videocache.cpp
+libgstavsynth_la_SOURCES = gstavsynth.c gstavsynth_loader.cpp gstavsynth_videofilter.cpp gstavsynth_scriptenvironment.cpp gstavsynth_scriptenvironment_c.cpp gstavsynth_videocache.cpp
 
 # flags used to compile this plugin
 # add other _CFLAGS and _LIBS as needed
@@ -30,7 +30,8 @@ libgstavsynth_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
 libgstavsynth_la_LIBTOOLFLAGS = --tag=disable-static
 libgstavsynthincludedir = $(includedir)/gstreamer-@GST_MAJORMINOR@/gst/avsynth
 libgstavsynthinclude_HEADERS = \
-	gstavsynth_sdk.h 
+	gstavsynth_sdk.h \
+        gstavsynth_sdk_c.h
 
 # headers we need but don't want installed
-noinst_HEADERS = gstavsynth.h gstavsynth_loader.h gstavsynth_videofilter.h gstavsynth_videocache.h gstavsynth_scriptenvironment.h
+noinst_HEADERS = gstavsynth.h gstavsynth_loader.h gstavsynth_videofilter.h gstavsynth_videocache.h gstavsynth_scriptenvironment.h gstavsynth_scriptenvironment_c.h

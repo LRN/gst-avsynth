@@ -35,7 +35,7 @@
 
 */
 
-#include <avsynth/gstavsynth_sdk.h>
+#include <avsynth/gstavsynth_sdk_cpp.h>
 
 /****************************
  * The following is the header definitions.

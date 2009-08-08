@@ -19,7 +19,7 @@
 	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 #include "version.h"
-#include <avsynth/gstavsynth_sdk.h>
+#include <avsynth/gstavsynth_sdk_cpp.h>
 
 #ifdef DEINTERLACE_MMX_BUILD
 #pragma warning(disable:4799)

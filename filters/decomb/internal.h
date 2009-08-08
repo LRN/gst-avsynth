@@ -31,7 +31,7 @@
 
 #define ATHLON  // comment this out if using the Intel compiler, or you need Pentium/K6 support
 
-#include <avsynth/gstavsynth_sdk.h>
+#include <avsynth/gstavsynth_sdk_cpp.h>
 
 
 struct AVSFunction {

@@ -18,18 +18,33 @@
  * Boston, MA 02111-1307, USA.
  */
 
-#include <gst/video/video.h>
-#include "gstavsynth_scriptenvironment.h"
-
 #ifndef __GST_AVSYNTH_VIDEOCACHE_H__
 #define __GST_AVSYNTH_VIDEOCACHE_H__
 
-/* This is a cache that caches frames coming from upstream
- * to be presented to underlying filter.
+#include "gstavsynth.h"
+#include "gstavsynth_sdk.h"
+
+/*
+ * These structures are stored in the cache
  */
-class GstAVSynthVideoCache: public IClip
+typedef struct _AVS_CacheableVideoFrame AVS_CacheableVideoFrame;
+struct _AVS_CacheableVideoFrame
 {
-private:
+  AVS_VideoFrame *vf;
+  gboolean touched;
+  /* Frame index */
+  guint64 selfindex;
+  /* For debugging */
+  guint64 countindex;
+};
+
+typedef struct _AVS_VideoCacheFilter AVS_VideoCacheFilter;
+struct _AVS_VideoCacheFilter
+{
+  AVS_GenericVideoFilter parent;
+  AVS_Clip *child;
+  AVS_DestroyFunc destroy;
+
   GPtrArray /*of ptrs to PVideoFrame*/ *bufs;
   /* Array starts at a user-specified (or default) size and grows twice
    * each time its size is found insufficient.
@@ -40,22 +55,11 @@ private:
    * used_size - number of elements really used for storage
    * size - number of filled elements
    */
-  guint64 rng_from;
+  gint64 rng_from;
   guint64 used_size, size;
 
   /* Number of buffer touched last time */
   guint64 touched_last_time;
-
-  /* Changes used_size to newsize. If used_size becomes larger than size,
-   * extends the cache
-   */
-  void Resize (gint64 newsize);
-
-  /* Caches the information about the video sequence.
-   * Some parts of it stays the same after _setcaps(), while other
-   * (such as field order for interlaced clips) may change over time.
-   */
-  VideoInfo vi;
 
   GCond *vcache_block_cond;
 
@@ -71,54 +75,50 @@ private:
 
   guint64 framecounter;
 
-public:
   GCond *vcache_cond;
-  /* start_size defines both the size of underlying array and the number of
-   * elements of that array used for cache.
-   */
-  GstAVSynthVideoCache(VideoInfo *init_vi, GstPad *in_pad, gint start_size = 10): bufs(g_ptr_array_new ()), rng_from (0), used_size (start_size), size (0), touched_last_time(0)
-  {
-    g_memmove (&vi, init_vi, sizeof (VideoInfo));
-    //vcache_mutex = g_mutex_new ();
-    vcache_cond = g_cond_new ();
-    vcache_block_cond = g_cond_new ();
-    pad = in_pad;
-    g_object_ref (pad);
-    g_ptr_array_set_size (bufs, start_size);
-    framecounter = 0;
-  };
 
-  __stdcall ~GstAVSynthVideoCache()
-  {
-    for (guint i = 0; i < bufs->len; i++)
-      delete (PVideoFrame *) g_ptr_array_index (bufs, i);
-    g_ptr_array_free (bufs, TRUE);
-    g_object_unref (pad);
-    g_cond_free (vcache_cond);
-    g_cond_free (vcache_block_cond);
-  }
-
-  gboolean AddBuffer (GstPad *pad, GstBuffer *in, ScriptEnvironment *env);
-
-  /* Fetches a buffer from the cache */
-  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
-
-  /* Haven't figured out yet what it does */
-  bool __stdcall GetParity(int n);  // return field parity if field_based, else parity of first field in frame
-
-  /* Probably will return empty buffers */
-  void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env);  // start and count are in samples
-
-  /* At the moment this function does nothing */
-  void __stdcall SetCacheHints(int cachehints,int frame_range);
-
-  const VideoInfo& __stdcall GetVideoInfo();
-
-  void ClearUntouched();
-
-  void Clear();
-
-  guint64 GetSize () { return size; };
+  AVS_VideoInfo vi;
 };
+
+
+void AVSC_CC
+_avs_vcf_destroy(AVS_Clip *p, gboolean freeself);
+
+AVS_VideoCacheFilter * AVSC_CC
+_avs_vcf_construct (AVS_VideoCacheFilter *p, AVS_VideoInfo init_vi, GstPad *in_pad, gint start_size);
+void AVSC_CC
+_avs_vcf_resize (AVS_VideoCacheFilter *p, gint64 newsize);
+
+gboolean AVSC_CC
+gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *caps, AVS_VideoInfo *vi);
+
+gboolean AVSC_CC
+_avs_vcf_add_buffer (AVS_VideoCacheFilter *p, GstPad *pad, GstBuffer *in, AVS_ScriptEnvironment *env);
+
+AVS_VideoFrame * AVSC_CC
+_avs_vcf_get_frame (AVS_Clip *p, gint64 n);
+
+gboolean AVSC_CC
+_avs_vcf_get_parity(AVS_Clip *p, gint64 n);
+
+void AVSC_CC
+_avs_vcf_get_audio (AVS_Clip *p, gpointer buf, gint64 start, gint64 count, AVS_ScriptEnvironment* env);
+
+void AVSC_CC
+_avs_vcf_set_cache_hints(AVS_Clip *p, gint cachehints, gint64 frame_range);
+
+AVS_VideoInfo AVSC_CC
+_avs_vcf_get_video_info (AVS_Clip *p);
+
+void AVSC_CC
+_avs_vcf_clear_untouched (AVS_VideoCacheFilter *p);
+
+void AVSC_CC
+_avs_vcf_clear (AVS_VideoCacheFilter *p);
+
+guint64 AVSC_CC
+_avs_vcf_get_size (AVS_VideoCacheFilter *p);
+
+gint64 gst_avsynth_query_duration (GstPad *pad, AVS_VideoInfo *vi);
 
 #endif /* __GST_AVSYNTH_VIDEOCACHE_H__ */

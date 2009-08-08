@@ -29,14 +29,22 @@
 #ifndef __GST_AVSYNTH_VIDEOFILTER_H__
 #define __GST_AVSYNTH_VIDEOFILTER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <gst/gst.h>
 
+#ifdef __cplusplus
+}
+#endif
 typedef struct _GstAVSynthVideoFilter GstAVSynthVideoFilter;
 typedef struct _GstAVSynthVideoFilterClass GstAVSynthVideoFilterClass;
 typedef struct _GstAVSynthVideoFilterClassParams GstAVSynthVideoFilterClassParams;
 
-#include "gstavsynth_scriptenvironment.h"
+#include "gstavsynth_scriptenvironment_cpp.h"
 #include "gstavsynth_videocache.h"
+#include "gstavsynth_videocache_cpp.h"
 
 G_BEGIN_DECLS
 
@@ -54,7 +62,8 @@ struct AVSynthSink
   GstPad *sinkpad;
 
   /* Cache object (starts at NULL, allocated when we get data) */
-  GstAVSynthVideoCache *cache;
+  GstAVSynthVideoCache *cache_cpp;
+  AVS_VideoCacheFilter *cache_c;
 
   /* Segment we've got from upstream on this pad, different for each pad */
   GstSegment segment;
@@ -78,7 +87,7 @@ struct AVSynthSink
   gboolean seeking;
 
   /* If seek is TRUE, seek to this frame or earlier */
-  guint64 seekhint;
+  gint64 seekhint;
 
   GMutex *sinkmutex;
 
@@ -115,12 +124,6 @@ struct _GstAVSynthVideoFilter
   /* A plugin that registered the function */
   GModule *plugin;
 
-  /* An object that implements the function */
-  PClip impl;
-  GMutex *impl_mutex;
-
-  ScriptEnvironment *env;
-
   /* We need to keep track of our pads, so we do so here. */
   GstPad *srcpad;
 
@@ -150,7 +153,8 @@ struct _GstAVSynthVideoFilter
   GMutex *stop_mutex;
 
   /* An array to store GObject properties to be passes to apply() */
-  AVSValue **args;  
+  AVSValue **args;
+  AVS_Value *args_c;
 
   /* VideoInfo of the last output buffer */
   VideoInfo vi;
@@ -169,6 +173,29 @@ struct _GstAVSynthVideoFilter
    * to seek with currently stored event, it will be replaced.
    */
   GstEvent *seek_event;
+
+  /* An object that implements the function */
+  PClip impl_cpp;
+  AVS_Clip *impl_c;
+  GMutex *impl_mutex;
+
+  ScriptEnvironment *env_cpp;
+  IScriptEnvironment::ShutdownFunc shutdown_cpp;
+  gpointer shutdown_data_cpp;
+  IScriptEnvironment::ApplyFunc apply_cpp;
+  gpointer user_data_cpp;
+
+  AVS_ScriptEnvironment *env_c;
+  AVSShutdownFunc shutdown_c;
+  gpointer shutdown_data_c;
+  AVSApplyFunc apply_c;
+  gpointer user_data_c;
+
+  /* String storage (for SaveString and *print function implementations) */
+  GStringChunk *string_dump;
+
+  /* From AviSynth */
+  gboolean PlanarChromaAlignmentState;
 };
 
 struct AVSynthVideoFilterParam
@@ -193,6 +220,9 @@ struct _GstAVSynthVideoFilterClass
   /* Function parameter string */
   const gchar *params;
 
+  /* Plugin is a C API plugin */
+  gboolean c;
+
   GstPadTemplate *srctempl, *sinktempl;
 
   GPtrArray /*of ptrs to AVSynthVideoFilterParam*/ *properties;
@@ -209,6 +239,9 @@ struct _GstAVSynthVideoFilterClassParams
   gchar *fullname;
   /* Function parameter string */
   const gchar *params;
+
+  /* This is a C API plugin */
+  gboolean c;
 
   GstCaps *srccaps, *sinkcaps;
 };
@@ -239,9 +272,9 @@ gboolean gst_avsynth_video_filter_negotiate (GstAVSynthVideoFilter * avsynth_vid
 
 #define GST_AVSYNTH_VIDEO_FILTER_PARAMS_QDATA g_quark_from_static_string("avsynth-video-filter-params")
 
-gboolean gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *caps, VideoInfo *vi);
-
-gint64 gst_avsynth_query_duration (GstPad *pad, VideoInfo *vi);
+void AVSC_CC _avs_se_init (AVS_ScriptEnvironment *e);
+AVS_ScriptEnvironment * AVSC_CC _avs_se_new (GstAVSynthVideoFilter *avsf);
+void AVSC_CC _avs_se_free (AVS_ScriptEnvironment *e);
 
 G_END_DECLS
 

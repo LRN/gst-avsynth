@@ -32,15 +32,115 @@
 # endif
 #endif
 
-#include "gstavsynth_sdk.h"
-#include "gstavsynth_videofilter.h"
 #include "gstavsynth_loader.h"
 
-gchar *plugindir_var = NULL;
+extern gchar *plugindir_var;
 
 const gchar *gst_avsynth_get_plugin_directory()
 {
   return AVSYNTHPLUGINDIR;
+}
+
+struct AVS_CLoaderData
+{
+  /* GStreamer plugin that registers the type */
+  GstPlugin *plugin;
+  /* Path to the plugin module (UTF-8) */
+  gchar *filename;
+  /* Prefix for full names*/
+  gchar *fullnameprefix;
+};
+
+gint AVSC_CC
+_avs_loader_se_add_function (AVS_ScriptEnvironment * p, const gchar * name, const gchar * paramstr, 
+                 const gchar* srccapstr, const gchar* sinkcapstr,
+                 AVSApplyFunc applyf, void * user_data)
+{
+  GstAVSynthVideoFilterClassParams *params;
+  gchar *type_name;
+  gchar *plugin_name;
+
+  GType type;
+  gint rank;
+
+  GTypeInfo typeinfo = {
+    sizeof (GstAVSynthVideoFilterClass),
+    (GBaseInitFunc) gst_avsynth_video_filter_base_init,
+    NULL,
+    (GClassInitFunc) gst_avsynth_video_filter_class_init,
+    NULL,
+    NULL,
+    sizeof (GstAVSynthVideoFilter),
+    0,
+    (GInstanceInitFunc) gst_avsynth_video_filter_init,
+  };
+
+  AVS_CLoaderData *data = (AVS_CLoaderData *)p->internal;
+
+  GST_DEBUG ("Trying filter %s(%s)", name, paramstr);
+
+  /* construct the type */
+  plugin_name = g_strdup ((gchar *) name);
+  g_strdelimit (plugin_name, NULL, '_');
+  type_name = g_strdup_printf ("avsynth_%s", plugin_name);
+  g_free (plugin_name);
+
+  /* if it's already registered, drop it */
+  if (g_type_from_name (type_name)) {
+    g_free (type_name);
+    return 0;
+  }
+
+  params = g_new0 (GstAVSynthVideoFilterClassParams, 1);
+  params->name = g_strdup (name);
+  params->fullname = g_strdup_printf ("%s_%s", data->fullnameprefix, (gchar *) name);
+  params->srccaps = gst_caps_from_string (srccapstr);
+  params->sinkcaps = gst_caps_from_string (sinkcapstr);
+  params->params = g_strdup ((gchar *) paramstr);
+  params->filename = g_strdup (data->filename);
+  params->c = TRUE;
+
+  /* create the gtype now */
+  type = g_type_register_static (GST_TYPE_ELEMENT, type_name, &typeinfo, (GTypeFlags) 0);
+  g_type_set_qdata (type, GST_AVSYNTH_VIDEO_FILTER_PARAMS_QDATA, (gpointer) params);
+
+  rank = GST_RANK_NONE;
+
+  if (!gst_element_register (data->plugin, type_name, rank, type))
+    g_warning ("Failed to register %s", type_name);
+
+  /* Don't free params contents because class uses them now */
+  g_free (type_name);
+  return 0;
+}
+
+void AVSC_CC
+_avs_loader_se_init (AVS_ScriptEnvironment *e, GstPlugin *plugin, gchar *filename, gchar *fullnameprefix)
+{
+  e->avs_se_add_function = _avs_loader_se_add_function;
+  ((AVS_CLoaderData *)e->internal)->plugin = plugin;
+  ((AVS_CLoaderData *)e->internal)->filename = filename;
+  ((AVS_CLoaderData *)e->internal)->fullnameprefix = fullnameprefix;
+}
+
+AVS_ScriptEnvironment * AVSC_CC
+_avs_loader_se_new (GstPlugin *plugin, gchar *filename, gchar *fullnameprefix)
+{
+  AVS_ScriptEnvironment *e = _avs_se_new (NULL);
+  e->internal = g_new0 (AVS_CLoaderData, 1);
+  _avs_loader_se_init (e, plugin, filename, fullnameprefix);
+  return e;
+}
+
+
+void AVSC_CC
+_avs_loader_se_free (AVS_ScriptEnvironment *e)
+{
+  g_free (((AVS_CLoaderData *)e->internal)->filename);
+  g_free (((AVS_CLoaderData *)e->internal)->fullnameprefix);
+  g_free (e->internal);
+  e->internal = NULL;
+  _avs_se_free (e);
 }
 
 /*
@@ -118,6 +218,7 @@ LoaderScriptEnvironment::AddFunction(const char* name, const char* paramstr, con
   params->sinkcaps = gst_caps_from_string (sinkcapstr);
   params->params = g_strdup ((gchar *) paramstr);
   params->filename = g_strdup (filename);
+  params->c = FALSE;
 
   /* create the gtype now */
   type = g_type_register_static (GST_TYPE_ELEMENT, type_name, &typeinfo, (GTypeFlags) 0);
@@ -145,8 +246,10 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
   GError *error = NULL;
   gchar **a_plugindirs = NULL;
   gchar **i_plugindirs = NULL;
+  AVS_ScriptEnvironment *env_c;
 
   LoaderScriptEnvironment *env = new LoaderScriptEnvironment();
+  env_c = _avs_loader_se_new(plugin, NULL, NULL);
 
   if (!g_module_supported())
   {
@@ -221,13 +324,14 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
           if (plugin_module)
           {
             AvisynthPluginInitFunc init_func;
+            AvisynthCPluginInitFunc init_func_c;
             const char *ret = NULL;
     
             GST_LOG ("Opened %s", full_filename_utf8);
              
             if(
-                  g_module_symbol (plugin_module, "AvisynthPluginInit2", (gpointer *) &init_func) ||
-                  g_module_symbol (plugin_module, "AvisynthPluginInit2@4", (gpointer *) &init_func)
+                 g_module_symbol (plugin_module, "AvisynthPluginInit2", (gpointer *) &init_func) ||
+                 g_module_symbol (plugin_module, "AvisynthPluginInit2@4", (gpointer *) &init_func)
               )
             {
               /* Assuming that g_path_get_basename() takes utf-8 string */
@@ -241,6 +345,22 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
               ret = init_func (env);
               GST_LOG ("Exited Init function");
               g_free (prefix);
+            }
+            else if (
+                g_module_symbol (plugin_module, "avisynth_c_plugin_init", (gpointer *) &init_func_c) ||
+                g_module_symbol (plugin_module, "avisynth_c_plugin_init@4", (gpointer *) &init_func_c)
+            )
+            {
+              /* Assuming that g_path_get_basename() takes utf-8 string */
+              gchar *prefix = g_path_get_basename (full_filename_utf8);
+              /* TODO: remove the file extension (if any) */
+              _avs_loader_se_init (env_c, plugin, full_filename_utf8, prefix);
+    
+              GST_LOG ("Entering Init function");
+              ret = init_func_c (env_c);
+              GST_LOG ("Exited Init function");
+              g_free (prefix);
+              
             }
             else
               GST_LOG ("Can't find AvisynthPluginInit2 or AvisynthPluginInit2@4");

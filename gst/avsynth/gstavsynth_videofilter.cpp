@@ -35,9 +35,11 @@
 #include <gst/gst.h>
 
 #include "gstavsynth.h"
-#include "gstavsynth_videocache.h"
 #include "gstavsynth_videofilter.h"
+#include "gstavsynth_videocache.h"
+#include "gstavsynth_videocache_cpp.h"
 #include "gstavsynth_loader.h"
+#include "gstavsynth_scriptenvironment.h"
 
 #define SEEK_TYPE_IS_RELATIVE(t) (((t) != GST_SEEK_TYPE_NONE) && ((t) != GST_SEEK_TYPE_SET))
 
@@ -116,6 +118,7 @@ gst_avsynth_video_filter_base_init (GstAVSynthVideoFilterClass * klass)
   klass->name = params->name;
   klass->fullname = params->fullname;
   klass->params = params->params;
+  klass->c = params->c;
 }
 
 void
@@ -380,73 +383,13 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
   gstelement_class->change_state = gst_avsynth_video_filter_change_state;
 }
 
-gint64
-gst_avsynth_query_duration (GstPad *pad, VideoInfo *vi)
-{
-  gint64 duration = -1, time_duration = -1;
-  gboolean ret;
-  GstFormat qfmt = GST_FORMAT_DEFAULT;
-  if (pad)
-  {
-    ret = gst_pad_query_peer_duration (pad, &qfmt, &duration);
-    if (!ret)
-    {
-      GST_INFO ("Failed to get duration in default format");
-      qfmt = GST_FORMAT_TIME;
-      ret = gst_pad_query_peer_duration (pad, &qfmt, &time_duration);
-      if (!ret)
-      {
-        GST_INFO ("Failed to get duration in time format");
-        duration = -1;
-      }
-      else
-      {
-        GstPad *peer = gst_pad_get_peer (pad);
-        if (peer)
-        {
-          qfmt = GST_FORMAT_DEFAULT;
-          if (!gst_pad_query_convert (peer, GST_FORMAT_TIME, time_duration, &qfmt, &duration))
-          {
-            GST_WARNING ("Failed to convert duration from time format to default format");
-            gst_object_unref (peer);
-            peer = NULL;
-          }
-          else
-            gst_object_unref (peer);
-          if (peer == NULL)
-          {
-            duration = gst_util_uint64_scale (time_duration, vi->fps_numerator,
-                vi->fps_denominator * GST_SECOND);
-            /* Attempt to round to nearest integer: if the difference is more
-             * than 0.5 (less than -0.5), it means that gst_util_uint64_scale()
-             * just truncated an integer, while it had to be rounded
-             */
-    
-            duration = duration * GST_SECOND - 
-                time_duration * vi->fps_numerator / vi->fps_denominator <= 
-                -0.5 ? duration + 1: duration;
-          }
-        }
-      }
-    }
-  
-    if (duration <= -1)
-    {
-      GST_WARNING ("Reporting duration as -1, may break some filters");
-    }
-  }
-  return duration;
-}
-
-
 GstBuffer *
-gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoInfo vi)
+gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame *pvf, AVS_VideoInfo *vi, AVS_VideoFrame *avf)
 {
   ImplVideoFrameBuffer *ivf;
   GstBuffer *ret = NULL;
   GstVideoFormat vf;
   GstCaps *caps = NULL;
-  //VideoInfo vi = NULL;
   gint data_size;
   gint gst_data_size;
   gint offset;
@@ -455,9 +398,14 @@ gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoIn
   gint comp_offset;
   gint row_size;
 
-  ivf = (ImplVideoFrameBuffer *) pvf->GetFrameBuffer();
+  if (pvf)
+  {
+    ivf = (ImplVideoFrameBuffer *) (*pvf)->GetFrameBuffer();
 
-  data_size = ivf->GetDataSize();
+    data_size = ivf->GetDataSize();
+  }
+  else
+    data_size = avf->vfb->data_size;
 
   if (!data_size)
   {
@@ -466,7 +414,7 @@ gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoIn
   }
 
   // Check requested pixel_type:
-  switch (vi.pixel_type) {
+  switch (vi->pixel_type) {
     case VideoInfo::CS_BGR24:
       vf = GST_VIDEO_FORMAT_YV12;
       break;
@@ -487,12 +435,12 @@ gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoIn
       return NULL;
   }
 
-  if (vi.IsFieldBased())
-    caps = gst_video_format_new_caps_interlaced (vf, vi.width, vi.height, vi.fps_numerator, vi.fps_denominator,  1, 1, TRUE);
+  if (AVS_IS_FIELD_BASED (vi))
+    caps = gst_video_format_new_caps_interlaced (vf, vi->width, vi->height, vi->fps_numerator, vi->fps_denominator,  1, 1, TRUE);
   else
-    caps = gst_video_format_new_caps_interlaced (vf, vi.width, vi.height, vi.fps_numerator, vi.fps_denominator,  1, 1, FALSE);
+    caps = gst_video_format_new_caps_interlaced (vf, vi->width, vi->height, vi->fps_numerator, vi->fps_denominator,  1, 1, FALSE);
 
-  gst_data_size = gst_video_format_get_size (vf, vi.width, vi.height);
+  gst_data_size = gst_video_format_get_size (vf, vi->width, vi->height);
   if (data_size != gst_data_size)
   {
     ret = gst_buffer_try_new_and_alloc (gst_data_size);
@@ -509,9 +457,9 @@ gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoIn
 
   gst_buffer_set_caps (ret, caps);
 
-  if (vi.IsParityKnown())
+  if (AVS_IS_PARITY_KNOWN (vi))
   {
-    if (vi.IsTFF())
+    if (AVS_IS_TFF(vi))
       GST_BUFFER_FLAG_SET (ret, GST_VIDEO_BUFFER_TFF);
     else
       GST_BUFFER_FLAG_UNSET (ret, GST_VIDEO_BUFFER_TFF);
@@ -519,39 +467,61 @@ gst_avsynth_ivf_to_buf (GstAVSynthVideoFilter *filter, PVideoFrame &pvf, VideoIn
 
   gst_caps_unref (caps);
 
-  for (gint64 ctr = 0; ctr < gst_data_size; ctr++)
-    GST_BUFFER_DATA (ret)[ctr] = (guint8) ctr;
+/*  For debugging 
+ *  for (gint64 ctr = 0; ctr < gst_data_size; ctr++)
+ *   GST_BUFFER_DATA (ret)[ctr] = (guint8) ctr;
+ */
 
-  comp_offset = gst_video_format_get_component_offset (vf, 0, vi.width, vi.height);
-  offset = pvf->GetOffset(PLANAR_Y);
-  stride = gst_video_format_get_row_stride (vf, 0, vi.width);
-  pitch = pvf->GetPitch(PLANAR_Y);
-  row_size = pvf->GetRowSize(PLANAR_Y);
+  comp_offset = gst_video_format_get_component_offset (vf, 0, vi->width, vi->height);
+  stride = gst_video_format_get_row_stride (vf, 0, vi->width);
+  if (pvf) {
+    offset = (*pvf)->GetOffset(PLANAR_Y);
+    pitch = (*pvf)->GetPitch(PLANAR_Y);
+    row_size = (*pvf)->GetRowSize(PLANAR_Y);
+    filter->env_cpp->BitBlt(GST_BUFFER_DATA (ret) + comp_offset, stride,
+        (*pvf)->GetReadPtr(PLANAR_Y)/* + offset*/, pitch, row_size, (*pvf)->GetHeight(PLANAR_Y));
 
-  filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride,
-      pvf->GetReadPtr(PLANAR_Y)/* + offset*/, pitch, row_size, pvf->GetHeight(PLANAR_Y));
+  } else {
+    offset = _avs_vf_get_offset_p (avf, PLANAR_Y);
+    pitch = _avs_vf_get_pitch_p (avf, PLANAR_Y);
+    row_size = _avs_vf_get_row_size_p (avf, PLANAR_Y);
+    filter->env_c->avs_se_bit_blt(filter->env_c, GST_BUFFER_DATA (ret) + comp_offset, stride,
+        _avs_vf_get_read_ptr_p (avf, PLANAR_Y)/* + offset*/, pitch, row_size, _avs_vf_get_height_p (avf, PLANAR_Y));
+  }
 
-  if (!(gst_video_format_get_component_offset (vf, 0, vi.width, vi.height) + 
-        gst_video_format_get_component_offset (vf, 1, vi.width, vi.height) +
-        gst_video_format_get_component_offset (vf, 2, vi.width, vi.height) +
-        gst_video_format_get_component_offset (vf, 3, vi.width, vi.height) <=
-        gst_video_format_get_component_width (vf, 0, vi.width)))
+  if (!(gst_video_format_get_component_offset (vf, 0, vi->width, vi->height) + 
+        gst_video_format_get_component_offset (vf, 1, vi->width, vi->height) +
+        gst_video_format_get_component_offset (vf, 2, vi->width, vi->height) +
+        gst_video_format_get_component_offset (vf, 3, vi->width, vi->height) <=
+        gst_video_format_get_component_width (vf, 0, vi->width)))
   {
-    comp_offset = gst_video_format_get_component_offset (vf, 1, vi.width, vi.height);
-    offset = pvf->GetOffset(PLANAR_U);
-    stride = gst_video_format_get_row_stride (vf, 1, vi.width);
-    pitch = pvf->GetPitch(PLANAR_U);
-    row_size = pvf->GetRowSize(PLANAR_U);
+    comp_offset = gst_video_format_get_component_offset (vf, 1, vi->width, vi->height);
+    stride = gst_video_format_get_row_stride (vf, 1, vi->width);
+    if (pvf) {
+      offset = (*pvf)->GetOffset(PLANAR_U);
+      pitch = (*pvf)->GetPitch(PLANAR_U);
+      row_size = (*pvf)->GetRowSize(PLANAR_U);
+      filter->env_cpp->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride, (*pvf)->GetReadPtr(PLANAR_U)/* + offset*/, pitch, row_size, (*pvf)->GetHeight(PLANAR_U));
+    } else {
+      offset = _avs_vf_get_offset_p (avf, PLANAR_U);
+      pitch = _avs_vf_get_pitch_p (avf, PLANAR_U);
+      row_size = _avs_vf_get_row_size_p (avf, PLANAR_U);
+      filter->env_c->avs_se_bit_blt (filter->env_c, GST_BUFFER_DATA (ret) + comp_offset, stride, _avs_vf_get_read_ptr_p(avf, PLANAR_U)/* + offset*/, pitch, row_size, _avs_vf_get_height_p (avf, PLANAR_U));
+    }
 
-    filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride, pvf->GetReadPtr(PLANAR_U)/* + offset*/, pitch, row_size, pvf->GetHeight(PLANAR_U));
-
-    comp_offset = gst_video_format_get_component_offset (vf, 2, vi.width, vi.height);
-    offset = pvf->GetOffset(PLANAR_V);
-    stride = gst_video_format_get_row_stride (vf, 2, vi.width);
-    pitch = pvf->GetPitch(PLANAR_V);
-    row_size = pvf->GetRowSize(PLANAR_V);
-    
-    filter->env->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride, pvf->GetReadPtr(PLANAR_V)/* + offset*/, pitch, row_size, pvf->GetHeight(PLANAR_V));
+    comp_offset = gst_video_format_get_component_offset (vf, 2, vi->width, vi->height);
+    stride = gst_video_format_get_row_stride (vf, 2, vi->width);
+    if (pvf) {
+      offset = (*pvf)->GetOffset(PLANAR_V);
+      pitch = (*pvf)->GetPitch(PLANAR_V);
+      row_size = (*pvf)->GetRowSize(PLANAR_V);
+      filter->env_cpp->BitBlt (GST_BUFFER_DATA (ret) + comp_offset, stride, (*pvf)->GetReadPtr(PLANAR_V)/* + offset*/, pitch, row_size, (*pvf)->GetHeight(PLANAR_V));
+    } else {
+      offset = _avs_vf_get_offset_p (avf, PLANAR_V);
+      pitch = _avs_vf_get_pitch_p (avf, PLANAR_V);
+      row_size = _avs_vf_get_row_size_p (avf, PLANAR_V);
+      filter->env_c->avs_se_bit_blt (filter->env_c, GST_BUFFER_DATA (ret) + comp_offset, stride, _avs_vf_get_read_ptr_p(avf, PLANAR_V)/* + offset*/, pitch, row_size, _avs_vf_get_height_p (avf, PLANAR_V));
+    }
   }
 
   return ret;
@@ -906,16 +876,16 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
   {
     AVSynthSink *sink = NULL;
     sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink);
     g_mutex_lock (sink->sinkmutex);
     sink->seek = TRUE;
     /* Prevents framegetter from shutting down */
     sink->starving = FALSE;
     sink->seeking = FALSE;
     sink->seekhint = seeksegment.time + sink->minframeshift;
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Set sink seek hint to %" G_GUINT64_FORMAT, (gpointer) sink->cache, sink->seekhint);
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Set sink seek hint to %" G_GUINT64_FORMAT, (gpointer) sink, sink->seekhint);
     g_mutex_unlock (sink->sinkmutex);
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink);
   }
 
   return res;
@@ -945,7 +915,8 @@ gst_avsynth_video_filter_framegetter (void *data)
   
   while (!stop && !eos)
   {
-    PVideoFrame vf = NULL;
+    PVideoFrame vf;
+    AVS_VideoFrame *avf = NULL;
     GstBuffer *outbuf;
 
     /* Store it, we'll need it later */
@@ -985,18 +956,31 @@ gst_avsynth_video_filter_framegetter (void *data)
 
     GST_DEBUG_OBJECT (avsynth_video_filter, "Calling GetFrame(%" G_GINT64_FORMAT ")", framenum);
 
-    vf = avsynth_video_filter->impl->GetFrame(framenum,
-        avsynth_video_filter->env);
-
+    if (avsynth_video_filter->impl_cpp)
+      vf = avsynth_video_filter->impl_cpp->GetFrame(framenum,
+          avsynth_video_filter->env_cpp);
+    else
+      avf = avsynth_video_filter->impl_c->get_frame (avsynth_video_filter->impl_c, framenum);
+      
     GST_DEBUG_OBJECT (avsynth_video_filter, "GetFrame() returned");
 
     /* Update last videoinfo */
-    avsynth_video_filter->vi = avsynth_video_filter->impl->GetVideoInfo();
-
-    outbuf = gst_avsynth_ivf_to_buf (avsynth_video_filter, vf, avsynth_video_filter->vi);
+    if (avsynth_video_filter->impl_cpp)
+    {
+      avsynth_video_filter->vi = avsynth_video_filter->impl_cpp->GetVideoInfo();
+      outbuf = gst_avsynth_ivf_to_buf (avsynth_video_filter, &vf, (AVS_VideoInfo *) &avsynth_video_filter->vi, NULL);
+    }
+    else
+    {
+      (*((AVS_VideoInfo *)&avsynth_video_filter->vi)) = avsynth_video_filter->impl_c->get_video_info (avsynth_video_filter->impl_c);
+      outbuf = gst_avsynth_ivf_to_buf (avsynth_video_filter, NULL, (AVS_VideoInfo *) &avsynth_video_filter->vi, avf);
+    }
 
     GST_BUFFER_OFFSET (outbuf) = avsynth_video_filter->segment.time++;
-    GST_BUFFER_TIMESTAMP (outbuf) = vf->GetTimestamp();
+    if (avsynth_video_filter->impl_cpp)
+      GST_BUFFER_TIMESTAMP (outbuf) = vf->GetTimestamp();
+    else
+      GST_BUFFER_TIMESTAMP (outbuf) = _avs_vf_get_timestamp (avf);
 #if 0
     GST_BUFFER_TIMESTAMP (outbuf) = gst_util_uint64_scale (GST_BUFFER_OFFSET (outbuf), avsynth_video_filter->vi.fps_denominator * GST_SECOND,
             avsynth_video_filter->vi.fps_numerator);
@@ -1016,7 +1000,10 @@ gst_avsynth_video_filter_framegetter (void *data)
       sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
       GST_DEBUG_OBJECT (avsynth_video_filter, "Calling ClearUntouched() for "
           "cache #%d", i);
-      sink->cache->ClearUntouched();
+      if (sink->cache_cpp)
+        sink->cache_cpp->ClearUntouched();
+      else
+        _avs_vcf_clear_untouched (sink->cache_c);
       GST_DEBUG_OBJECT (avsynth_video_filter, "Returned from ClearUntouched() "
           "for cache #%d", i);
       g_mutex_lock (sink->sinkmutex);
@@ -1048,7 +1035,7 @@ gst_avsynth_video_filter_framegetter (void *data)
       gint64 stop_pos;
       GstEvent *newsegevent;
       avsynth_video_filter->newsegment = FALSE;
-      if (avsynth_video_filter->seeksegment.start == GST_CLOCK_TIME_NONE)
+      if (!GST_CLOCK_TIME_IS_VALID (avsynth_video_filter->seeksegment.start))
       {
         avsynth_video_filter->seeksegment.duration = avsynth_video_filter->vi.num_frames;
         /*We've just started the playback, send new segment before data */
@@ -1059,7 +1046,7 @@ gst_avsynth_video_filter_framegetter (void *data)
       avsynth_video_filter->segment = avsynth_video_filter->seeksegment;
       /* for deriving a stop position for the playback segment from the seek
        * segment, we must take the duration when stop is not set */
-      if ((stop_pos= avsynth_video_filter->segment.stop) == GST_CLOCK_TIME_NONE)
+      if (!GST_CLOCK_TIME_IS_VALID (stop_pos = avsynth_video_filter->segment.stop))
         stop_pos = avsynth_video_filter->segment.duration;
   
       GST_DEBUG_OBJECT (avsynth_video_filter, "Sending newsegment from %"
@@ -1236,13 +1223,12 @@ void
 gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
 {
   AvisynthPluginInitFunc init_func = NULL;
+  AvisynthCPluginInitFunc init_func_c = NULL;
   GstAVSynthVideoFilterClass *oclass;
   gchar *full_filename = NULL;
   gint sinkcount = 0;
 
   oclass = (GstAVSynthVideoFilterClass *) (G_OBJECT_GET_CLASS (avsynth_video_filter));
-
-  avsynth_video_filter->env = new ScriptEnvironment(avsynth_video_filter);
 
   full_filename = g_filename_from_utf8 (oclass->filename, -1, NULL, NULL, NULL);
 
@@ -1251,16 +1237,32 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
   g_free (full_filename);
   
   GST_LOG ("Getting AvisynthPluginInit2...");
-  if (!g_module_symbol (avsynth_video_filter->plugin, "AvisynthPluginInit2", (gpointer *) &init_func))
+  if (!oclass->c)
   {
-    GST_LOG ("Failed to get AvisynthPluginInit2. Getting AvisynthPluginInit2@4...");
-    if (!g_module_symbol (avsynth_video_filter->plugin, "AvisynthPluginInit2@4", (gpointer *) &init_func))
+    avsynth_video_filter->env_cpp = new ScriptEnvironment((gpointer) avsynth_video_filter);
+    if (!g_module_symbol (avsynth_video_filter->plugin, "AvisynthPluginInit2", (gpointer *) &init_func))
     {
-      GST_ERROR ("Failed to get AvisynthPluginInits. Something is wrong here...");
+      GST_LOG ("Failed to get AvisynthPluginInit2. Getting AvisynthPluginInit2@4...");
+      if (!g_module_symbol (avsynth_video_filter->plugin, "AvisynthPluginInit2@4", (gpointer *) &init_func))
+      {
+        GST_ERROR ("Failed to get AvisynthPluginInits. Something is wrong here...");
+      }
     }
+    init_func (avsynth_video_filter->env_cpp);
   }
-
-  init_func (avsynth_video_filter->env);
+  else
+  {
+    avsynth_video_filter->env_c = _avs_se_new (avsynth_video_filter);
+    if (!g_module_symbol (avsynth_video_filter->plugin, "avisynth_c_plugin_init", (gpointer *) &init_func_c))
+    {
+      GST_LOG ("Failed to get AvisynthPluginInit2. Getting avisynth_c_plugin_init@4...");
+      if (!g_module_symbol (avsynth_video_filter->plugin, "avisynth_c_plugin_init@4", (gpointer *) &init_func_c))
+      {
+        GST_ERROR ("Failed to get avisynth_c_plugin_inits. Something is wrong here...");
+      }
+    }
+    init_func_c (avsynth_video_filter->env_c);
+  }
 
   /* setup pads */
 
@@ -1293,7 +1295,8 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
         GST_DEBUG_FUNCPTR (gst_avsynth_video_filter_chain));
 
     gst_element_add_pad (GST_ELEMENT (avsynth_video_filter), sink->sinkpad);
-    sink->cache = NULL;
+    sink->cache_cpp = NULL;
+    sink->cache_c = NULL;
     sink->sinkmutex = g_mutex_new ();
     sink->firstcall = TRUE;
     g_object_set_data (G_OBJECT (sink->sinkpad), "sinkstruct", (gpointer) sink);
@@ -1324,8 +1327,12 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
   avsynth_video_filter->impl_mutex = g_mutex_new ();
 
   avsynth_video_filter->args = new PAVSValue[oclass->properties->len];
+  avsynth_video_filter->args_c = g_new (AVS_Value, oclass->properties->len);
   for (guint i = 0; i < oclass->properties->len; i++)
+  {
     avsynth_video_filter->args[i] = NULL;
+    avsynth_video_filter->args_c[i].type = 'v';
+  }
 
   avsynth_video_filter->uninitialized = TRUE;
 
@@ -1339,6 +1346,7 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
   avsynth_video_filter->seek_event = NULL;
 
   avsynth_video_filter->newsegment = TRUE;
+  avsynth_video_filter->string_dump = g_string_chunk_new (4096);
 }
 
 void
@@ -1348,6 +1356,8 @@ gst_avsynth_video_filter_finalize (GObject * object)
 
   g_module_close (avsynth_video_filter->plugin);
   /* FIXME: free the stuff */
+
+  g_string_chunk_free (avsynth_video_filter->string_dump);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -1751,7 +1761,7 @@ gst_avsynth_video_filter_src_event (GstPad * pad, GstEvent * event)
       avsynth_video_filter->seek_event = gst_event_ref (event);
       GST_DEBUG_OBJECT (avsynth_video_filter, "Stored seek event %p for further handling", event);
 
-      if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) != GST_TASK_STARTED) && avsynth_video_filter->impl))
+      if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) != GST_TASK_STARTED) && (avsynth_video_filter->impl_cpp || avsynth_video_filter->impl_c)))
       {
         GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
         gst_task_start (avsynth_video_filter->framegetter);
@@ -1855,24 +1865,39 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
    */
 
   vi = g_new0 (VideoInfo, 1);
-  gst_avsynth_buf_pad_caps_to_vi (NULL, pad, caps, vi);
+  gst_avsynth_buf_pad_caps_to_vi (NULL, pad, caps, (AVS_VideoInfo*) vi);
 
   /* New caps -> new VideoInfo -> new videocache */
-  if (sink->cache)
+  if (!oclass->c)
   {
-    delete sink->cache;
-    sink->cache = NULL;
+    if (sink->cache_cpp)
+    {
+      delete sink->cache_cpp;
+      sink->cache_cpp = NULL;
+    }
+    sink->cache_cpp = new GstAVSynthVideoCache(vi, pad);
   }
-  sink->cache = new GstAVSynthVideoCache(vi, pad);
+  else
+  {
+    if (sink->cache_c)
+    {
+      _avs_clip_release ((AVS_Clip *)sink->cache_c);
+      sink->cache_c = NULL;
+    }
+    sink->cache_c = _avs_vcf_construct (NULL, *((AVS_VideoInfo *)vi), pad, 10);
+  }
 
   GST_DEBUG_OBJECT (avsynth_video_filter, "Locking impl_mutex");
   g_mutex_lock (avsynth_video_filter->impl_mutex);
-  if (avsynth_video_filter->impl)
+  if ((avsynth_video_filter->impl_cpp || avsynth_video_filter->impl_c))
   {
     /* PClip is a weird one, but i think that NULL assignment should
      * make it call the destructor. FIXME: make sure it does.
      */
-    avsynth_video_filter->impl = NULL;
+    if (avsynth_video_filter->impl_cpp)
+      avsynth_video_filter->impl_cpp = NULL;
+    else if (avsynth_video_filter->impl_c)
+      _avs_clip_release (avsynth_video_filter->impl_c);
     /* Next time we get any data, recreate the filter */
     avsynth_video_filter->uninitialized = TRUE;
   }
@@ -1906,41 +1931,45 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_EOS:
     {
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink);
       g_mutex_lock (sink->sinkmutex);
       sink->eos = TRUE;
       /* If that pad is waiting for data, wake it up, since there will be
        * no data to wait for.
        */
-      if (sink->cache)
-        g_cond_signal (sink->cache->vcache_cond);
+      if (sink->cache_cpp)
+        g_cond_signal (sink->cache_cpp->vcf->vcache_cond);
+      else if (sink->cache_c)
+        g_cond_signal (sink->cache_c->vcache_cond);
       g_mutex_unlock (sink->sinkmutex);
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink);
       ret = TRUE;
       break;
     }
     case GST_EVENT_FLUSH_START:
     {
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink);
       g_mutex_lock (sink->sinkmutex);
       sink->flush = TRUE;
       g_mutex_unlock (sink->sinkmutex);
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink);
 
       ret = TRUE;//gst_pad_push_event (avsynth_video_filter->srcpad, event);
     }
     case GST_EVENT_FLUSH_STOP:
     {
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink);
       g_mutex_lock (sink->sinkmutex);
-      if (sink->cache)
-        sink->cache->Clear();
+      if (sink->cache_cpp)
+        sink->cache_cpp->Clear();
+      else if (sink->cache_c)
+        _avs_vcf_clear (sink->cache_c);
       /* FIXME: init segment */
       sink->eos = FALSE;
       sink->starving = FALSE;
       sink->flush = FALSE;
       g_mutex_unlock (sink->sinkmutex);
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink);
       
       ret = TRUE;//gst_pad_push_event (avsynth_video_filter->srcpad, event);
       break;
@@ -1956,7 +1985,7 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
       gst_event_parse_new_segment_full (event, &update, &rate, &arate, &fmt,
           &start, &stop, &time);
 
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink);
       g_mutex_lock (sink->sinkmutex);
       switch (fmt) {
         case GST_FORMAT_DEFAULT:
@@ -1964,9 +1993,9 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
               arate, fmt, start, stop, time);
           break;
         default:
-          if ((start == GST_CLOCK_TIME_NONE || gst_pad_query_peer_convert (pad, fmt, start, &dst_fmt, &dst_start)) &&
-              (stop == GST_CLOCK_TIME_NONE || gst_pad_query_peer_convert (pad, fmt, stop, &dst_fmt, &dst_stop)) &&
-              (time == GST_CLOCK_TIME_NONE || gst_pad_query_peer_convert (pad, fmt, time, &dst_fmt, &dst_time)))
+          if ((!GST_CLOCK_TIME_IS_VALID(start)|| gst_pad_query_peer_convert (pad, fmt, start, &dst_fmt, &dst_start)) &&
+              (!GST_CLOCK_TIME_IS_VALID(stop) || gst_pad_query_peer_convert (pad, fmt, stop, &dst_fmt, &dst_stop)) &&
+              (!GST_CLOCK_TIME_IS_VALID(time) || gst_pad_query_peer_convert (pad, fmt, time, &dst_fmt, &dst_time)))
           {
             gst_segment_set_newsegment_full (&sink->defsegment, update, rate,
                 arate, dst_fmt, dst_start, dst_stop, dst_time);
@@ -1979,7 +2008,7 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
       sink->eos = FALSE;
       sink->starving = FALSE;
       g_mutex_unlock (sink->sinkmutex);
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink);
       /* If EOS conditions are still true, next framegetter run will set eos back */
       avsynth_video_filter->eos = FALSE;
       ret = TRUE;
@@ -1994,6 +2023,119 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
 
   return ret;
 }
+
+void gst_avsynth_video_filter_init_plugin(GstAVSynthVideoFilter *avsynth_video_filter, GstAVSynthVideoFilterClass *oclass)
+{
+  AVS_Value arguments_c;
+  AVSValue *arguments;
+  gint sinkcount = 0;
+  AVS_Value clipval_c;
+  AVSValue clipval;
+  gboolean ready = TRUE;
+
+  if (oclass->c)
+    arguments_c = _avs_val_new_array (oclass->properties->len);
+  else
+    arguments = new AVSValue[oclass->properties->len];
+
+  /* args are initialized by _set_property() */
+  /* FIXME: simplify the readiness check */
+  for (guint i = 0; i < oclass->properties->len && ready; i++)
+  {
+    AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (oclass->properties, i);
+    AVS_Value arg_c;
+    AVSValue *arg;
+
+    if (oclass->c)
+      arg_c = avsynth_video_filter->args_c[i];
+    else
+      arg = avsynth_video_filter->args[i];
+
+    /* Clip argument */
+    if (param->param_type == 'c')
+    {
+      GstCaps *padcaps;
+      AVSynthSink *sink;
+      sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, sinkcount);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink);
+      g_mutex_lock (sink->sinkmutex);
+      padcaps = gst_pad_get_negotiated_caps (sink->sinkpad);
+
+     /* FIXME: If the argument is mandatory, the filter will not check whether it is NULL or not,
+      * it will just call its AsClip().
+      * I am yet to find a filter that accepts _optional_ second clip argument, so i don't know
+      * anything about optional clip arguments. Until i figure it out, it's an error.
+      */
+      if (!sink->cache_cpp && !sink->cache_c)
+      {
+        if (!padcaps)
+        {
+          GST_DEBUG ("Sink %d is linked, but not negotiated. Waiting.", sinkcount);
+          ready = FALSE;
+        }
+        else
+          GST_ERROR ("Sink %d is negotiated, but does not have a cache attached.", sinkcount);
+      }
+      else 
+      {
+        /* Wait until we get some data, to know parity */
+        if ((sink->cache_cpp && sink->cache_cpp->GetSize() > 0) || (sink->cache_c && _avs_vcf_get_size (sink->cache_c) > 0))
+        {
+          if (oclass->c)
+          {
+            _avs_val_set_to_clip(&(AVS_ARRAY_ELT (arguments_c, i)), (AVS_Clip *) sink->cache_c);
+//            _avs_val_set_to_clip(&(AVS_ARRAY_ELT (arguments_c, i)), sink->cache_c);
+          }
+          else
+            arguments[i] = AVSValue ((IClip *) sink->cache_cpp);
+        }
+        else
+          ready = FALSE;
+      }
+      if (padcaps)
+        gst_caps_unref (padcaps);
+
+      g_mutex_unlock (sink->sinkmutex);
+      GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink);
+      sinkcount++;
+    }
+    else if (arg != NULL)
+    {
+      if (oclass->c)
+        AVS_ARRAY_ELT (arguments_c, i) = arg_c;
+      else
+        arguments[i] = *arg;
+    }
+  }
+
+  if (ready)
+  {
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Wrapper is ready, calling apply()");
+    if (oclass->c)
+      clipval_c = avsynth_video_filter->apply_c (avsynth_video_filter->env_c, arguments_c, avsynth_video_filter->user_data_c);
+    else
+      clipval = avsynth_video_filter->apply_cpp (AVSValue (arguments, oclass->properties->len), avsynth_video_filter->user_data_cpp, avsynth_video_filter->env_cpp);
+    GST_DEBUG_OBJECT (avsynth_video_filter, "apply() returned");
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Locking impl_mutex");
+    g_mutex_lock (avsynth_video_filter->impl_mutex);
+    if (!oclass->c)
+      avsynth_video_filter->impl_cpp = clipval.AsClip();
+    else
+    {
+      avsynth_video_filter->impl_c = _avs_val_take_clip(clipval_c);
+      _avs_val_release(clipval_c);
+    }
+    g_mutex_unlock (avsynth_video_filter->impl_mutex);
+    GST_DEBUG_OBJECT (avsynth_video_filter, "Unlocked impl_mutex");
+    avsynth_video_filter->uninitialized = FALSE;
+  }
+
+  if (oclass->c)
+    _avs_val_release (arguments_c);
+  else
+    delete [] arguments;
+}
+
 
 GstFlowReturn
 gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
@@ -2030,85 +2172,11 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
 
   if (G_UNLIKELY (avsynth_video_filter->uninitialized))
   {
-    AVSValue *arguments;
-    gint sinkcount = 0;
-    AVSValue clipval;
-    gboolean ready = TRUE;
-
     GST_DEBUG_OBJECT (pad, "Attempting to create the filter");
-
-    arguments = new AVSValue[oclass->properties->len];
-  
-    /* args are initialized by _set_property() */
-    /* FIXME: simplify the readiness check */
-    for (guint i = 0; i < oclass->properties->len && ready; i++)
-    {
-      AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (oclass->properties, i);
-      AVSValue *arg = avsynth_video_filter->args[i];
-      /* Clip argument */
-      if (param->param_type == 'c')
-      {
-        GstCaps *padcaps;
-        sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, sinkcount);
-        GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Locking sinkmutex", (gpointer) sink->cache);
-        g_mutex_lock (sink->sinkmutex);
-        padcaps = gst_pad_get_negotiated_caps (sink->sinkpad);
-
-       /* FIXME: If the argument is mandatory, the filter will not check whether it is NULL or not,
-        * it will just call its AsClip().
-        * I am yet to find a filter that accepts _optional_ second clip argument, so i don't know
-        * anything about optional clip arguments. Until i figure it out, it's an error.
-        */
-        if (sink->cache == NULL)
-        {
-          if (!padcaps)
-          {
-            GST_DEBUG ("Sink %d is linked, but not negotiated. Waiting.", sinkcount);
-            ready = FALSE;
-          }
-          else
-            GST_ERROR ("Sink %d is negotiated, but does not have a cache attached.", sinkcount);
-        }
-        else 
-        {
-          /* Wait until we get some data, to know parity */
-          if (sink->cache->GetSize() > 0)
-          {
-            arguments[i] = AVSValue ((IClip *) sink->cache);
-          }
-          else
-            ready = FALSE;
-        }
-        if (padcaps)
-          gst_caps_unref (padcaps);
-
-        g_mutex_unlock (sink->sinkmutex);
-        GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink->cache);
-        sinkcount++;
-      }
-      else if (arg != NULL)
-      {
-        arguments[i] = *arg;
-      }
-    }
-  
-    if (ready)
-    {
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Wrapper is ready, calling apply()");
-      clipval = avsynth_video_filter->env->apply (AVSValue (arguments, oclass->properties->len), avsynth_video_filter->env->userdata, avsynth_video_filter->env);
-      GST_DEBUG_OBJECT (avsynth_video_filter, "apply() returned");
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Locking impl_mutex");
-      g_mutex_lock (avsynth_video_filter->impl_mutex);
-      avsynth_video_filter->impl = clipval.AsClip();
-      g_mutex_unlock (avsynth_video_filter->impl_mutex);
-      GST_DEBUG_OBJECT (avsynth_video_filter, "Unlocked impl_mutex");
-      avsynth_video_filter->uninitialized = FALSE;
-    }
-
-    delete [] arguments;
+    gst_avsynth_video_filter_init_plugin(avsynth_video_filter, oclass);
   }
 
-  if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) != GST_TASK_STARTED) && avsynth_video_filter->impl))
+  if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) != GST_TASK_STARTED) && (avsynth_video_filter->impl_cpp || avsynth_video_filter->impl_c)))
   {
     GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
     gst_task_start (avsynth_video_filter->framegetter);
@@ -2119,7 +2187,10 @@ gst_avsynth_video_filter_chain (GstPad * pad, GstBuffer * inbuf)
   GST_DEBUG_OBJECT (pad, "Calling AddBuffer()...");
 
   sink = (AVSynthSink *) g_object_get_data (G_OBJECT (pad), "sinkstruct");
-  sink->cache->AddBuffer (pad, inbuf, avsynth_video_filter->env);
+  if (!oclass->c)
+    sink->cache_cpp->AddBuffer (pad, inbuf, avsynth_video_filter->env_cpp);
+  else
+    _avs_vcf_add_buffer (sink->cache_c, pad, inbuf, avsynth_video_filter->env_c);
 
   gst_object_unref (avsynth_video_filter);
 
@@ -2164,27 +2235,55 @@ gst_avsynth_video_filter_set_property (GObject * object,
     AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (filter_class->properties, i);
     if (param->param_id == prop_id)
     {
-      AVSValue *arg = avsynth_video_filter->args[i];
       found = TRUE;
-      if (arg == NULL)
-        arg = avsynth_video_filter->args[i] = new AVSValue();
-      switch (param->param_type)
+      if (filter_class->c)
       {
-        case 'b':
-          *arg = AVSValue ((bool) g_value_get_boolean (value));
-          break;
-        case 'i':
-          *arg = AVSValue (g_value_get_int (value));
-          break;
-        case 'f':
-          *arg = AVSValue (g_value_get_float (value));
-          break;
-        case 's':
-          *arg = AVSValue (g_value_get_string (value));
-          break;
-        default:
-          G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-          break;
+        switch (param->param_type)
+        {
+          case 'b':
+            avsynth_video_filter->args_c[i].d.boolean = g_value_get_boolean (value);
+            avsynth_video_filter->args_c[i].type = 'b';
+            break;
+          case 'i':
+            avsynth_video_filter->args_c[i].d.integer = g_value_get_int (value);
+            avsynth_video_filter->args_c[i].type = 'i';
+            break;
+          case 'f':
+            avsynth_video_filter->args_c[i].d.floating_pt = g_value_get_float (value);
+            avsynth_video_filter->args_c[i].type = 'f';
+            break;
+          case 's':
+            avsynth_video_filter->args_c[i].d.string = g_value_get_string (value);
+            avsynth_video_filter->args_c[i].type = 's';
+            break;
+          default:
+            G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+            break;
+        }
+      }
+      else
+      {
+        AVSValue *arg = avsynth_video_filter->args[i];
+        if (arg == NULL)
+          arg = avsynth_video_filter->args[i] = new AVSValue();
+        switch (param->param_type)
+        {
+          case 'b':
+            *arg = AVSValue ((bool) g_value_get_boolean (value));
+            break;
+          case 'i':
+            *arg = AVSValue (g_value_get_int (value));
+            break;
+          case 'f':
+            *arg = AVSValue (g_value_get_float (value));
+            break;
+          case 's':
+            *arg = AVSValue (g_value_get_string (value));
+            break;
+          default:
+            G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+            break;
+        }
       }
     }
   }
@@ -2207,29 +2306,57 @@ gst_avsynth_video_filter_get_property (GObject * object,
 
     if (param->param_id == prop_id)
     {
-      AVSValue *arg = avsynth_video_filter->args[i];
       found = TRUE;
-      if (arg == NULL)
+      if (filter_class->c)
       {
-	continue;
+        if (!AVS_DEFINED(avsynth_video_filter->args_c[i]))
+        {
+          continue;
+        }
+        switch (param->param_type)
+        {
+          case 'b':
+            g_value_set_boolean (value, avsynth_video_filter->args_c[i].d.boolean);
+            break;
+          case 'i':
+            g_value_set_int (value, avsynth_video_filter->args_c[i].d.integer);
+            break;
+          case 'f':
+            g_value_set_float (value, avsynth_video_filter->args_c[i].d.floating_pt);
+            break;
+          case 's':
+            g_value_set_string (value, avsynth_video_filter->args_c[i].d.string);
+            break;
+          default:
+            G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+            break;
+        }
       }
-      switch (param->param_type)
+      else
       {
-        case 'b':
-          g_value_set_boolean (value, arg->AsBool());
-          break;
-        case 'i':
-          g_value_set_int (value, arg->AsInt());
-          break;
-        case 'f':
-          g_value_set_float (value, arg->AsFloat());
-          break;
-        case 's':
-          g_value_set_string (value, arg->AsString());
-          break;
-        default:
-          G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-          break;
+        AVSValue *arg = avsynth_video_filter->args[i];
+        if (arg == NULL)
+        {
+          continue;
+        }
+        switch (param->param_type)
+        {
+          case 'b':
+            g_value_set_boolean (value, arg->AsBool());
+            break;
+          case 'i':
+            g_value_set_int (value, arg->AsInt());
+            break;
+          case 'f':
+            g_value_set_float (value, arg->AsFloat());
+            break;
+          case 's':
+            g_value_set_string (value, arg->AsString());
+            break;
+          default:
+            G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+            break;
+        }
       }
       return;
     }
@@ -2237,3 +2364,111 @@ gst_avsynth_video_filter_get_property (GObject * object,
   if (!found)
     G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 }
+
+void
+_avs_se_init (AVS_ScriptEnvironment *e)
+{
+  e->avs_clip_release = _avs_clip_release;
+  e->avs_clip_ref = _avs_clip_ref;
+  e->avs_clip_construct = _avs_clip_construct;
+/*  e->avs_clip_destroy = _avs_clip_destroy;*/
+  e->avs_clip_get_error = _avs_clip_get_error;
+  e->avs_clip_get_version = _avs_clip_get_version;
+  e->avs_clip_get_video_info = _avs_clip_get_video_info;
+  e->avs_clip_get_frame = _avs_clip_get_frame;
+  e->avs_clip_get_parity = _avs_clip_get_parity;
+  e->avs_clip_get_audio = _avs_clip_get_audio;
+  e->avs_clip_set_cache_hints = _avs_clip_set_cache_hints;
+/*  e->avs_clip_copy = _avs_clip_copy;*/
+
+  e->avs_se_get_cpu_flags = _avs_se_get_cpu_flags;
+  e->avs_se_save_string = _avs_se_save_string;
+  e->avs_se_sprintf = _avs_se_sprintf;
+  e->avs_se_vsprintf = _avs_se_vsprintf;
+  e->avs_se_function_exists = _avs_se_function_exists;
+  e->avs_se_invoke = _avs_se_invoke;
+  e->avs_se_get_var = _avs_se_get_var;
+  e->avs_se_set_var = _avs_se_set_var;
+  e->avs_se_set_global_var = _avs_se_set_global_var;
+  e->avs_se_bit_blt = _avs_se_bit_blt;
+  e->avs_se_at_exit = _avs_se_at_exit;
+  e->avs_se_check_version = _avs_se_check_version;
+  e->avs_se_subframe = _avs_se_subframe;
+  e->avs_se_subframe_p = _avs_se_subframe_p;
+  e->avs_se_set_memory_max = _avs_se_set_memory_max;
+  e->avs_se_set_working_dir = _avs_se_set_working_dir;
+  e->avs_se_add_function = _avs_se_add_function;
+
+  e->avs_se_vf_new_a = _avs_se_vf_new_a;
+  e->avs_vf_get_offset = _avs_vf_get_offset;
+  e->avs_vf_get_offset_p = _avs_vf_get_offset_p;
+  e->avs_vf_get_pitch = _avs_vf_get_pitch;
+  e->avs_vf_get_pitch_p = _avs_vf_get_pitch_p;
+  e->avs_vf_get_row_size = _avs_vf_get_row_size;
+  e->avs_vf_get_row_size_p = _avs_vf_get_row_size_p;
+  e->avs_vf_get_height = _avs_vf_get_height;
+  e->avs_vf_get_height_p = _avs_vf_get_height_p;
+  e->avs_vf_get_read_ptr = _avs_vf_get_read_ptr;
+  e->avs_vf_get_read_ptr_p = _avs_vf_get_read_ptr_p;
+  e->avs_se_make_vf_writable = _avs_se_make_vf_writable;
+  e->avs_vf_is_writable = _avs_vf_is_writable;
+  e->avs_vf_get_write_ptr = _avs_vf_get_write_ptr;
+  e->avs_vf_get_write_ptr_p = _avs_vf_get_write_ptr_p;
+  e->avs_vf_get_parity = _avs_vf_get_parity;
+  e->avs_vf_set_parity = _avs_vf_set_parity;
+  e->avs_vf_get_timestamp = _avs_vf_get_timestamp;
+  e->avs_vf_set_timestamp = _avs_vf_set_timestamp;
+  e->avs_vf_ref = _avs_vf_ref;
+  e->avs_vf_destroy = _avs_vf_destroy;
+  e->avs_vf_release = _avs_vf_release;
+/*  e->avs_vf_copy = _avs_vf_copy; */
+
+/*
+  e->avs_gvf_destroy = _avs_gvf_destroy;
+*/
+  e->avs_gvf_construct = _avs_gvf_construct;
+/*
+  e->avs_gvf_get_frame = _avs_gvf_get_frame;
+  e->avs_gvf_get_audio = _avs_gvf_get_audio;
+  e->avs_gvf_get_video_info = _avs_gvf_get_video_info;
+  e->avs_gvf_get_parity = _avs_gvf_get_parity;
+  e->avs_gvf_set_cache_hints = _avs_gvf_set_cache_hints;
+*/
+
+  e->avs_val_take_clip = _avs_val_take_clip;
+  e->avs_val_set_to_clip = _avs_val_set_to_clip;
+  e->avs_val_copy = _avs_val_copy;
+  e->avs_val_release = _avs_val_release;
+
+  e->avs_val_new_bool = _avs_val_new_bool;
+  e->avs_val_new_int = _avs_val_new_int;
+  e->avs_val_new_string = _avs_val_new_string;
+  e->avs_val_new_float = _avs_val_new_float;
+  e->avs_val_new_error = _avs_val_new_error;
+  e->avs_val_new_clip = _avs_val_new_clip;
+  e->avs_val_new_array = _avs_val_new_array;
+
+  e->error = NULL;
+}
+
+AVS_ScriptEnvironment *
+_avs_se_new (GstAVSynthVideoFilter *avsf)
+{
+  AVS_ScriptEnvironment *e = g_new0 (AVS_ScriptEnvironment, 1);
+  _avs_se_init (e);
+  e->internal = (gpointer) avsf;
+  if (avsf)
+    g_object_ref (G_OBJECT (avsf));
+  return e;
+}
+
+void
+_avs_se_free (AVS_ScriptEnvironment *e)
+{
+  if (e->internal)
+    g_object_unref (G_OBJECT((GstAVSynthVideoFilter *)e->internal));
+  if (e->error)
+    g_free (e->error);
+  g_free (e);
+}
+

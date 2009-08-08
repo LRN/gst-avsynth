@@ -29,8 +29,18 @@
 #ifndef __GST_AVSYNTH_LOADER_H__
 #define __GST_AVSYNTH_LOADER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "gstavsynth.h"
 #include "gstavsynth_sdk.h"
+
+#ifdef __cplusplus
+}
+#endif
+
+#include "gstavsynth_sdk_cpp.h"
 #include "gstavsynth_videofilter.h"
 
 typedef const char* (__stdcall *AvisynthPluginInitFunc)(IScriptEnvironment* env);

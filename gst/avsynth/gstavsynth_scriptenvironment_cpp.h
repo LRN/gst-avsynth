@@ -63,8 +63,6 @@ public:
   ImplVideoFrameBuffer(AVS_VideoFrameBuffer *in_vfb_c):VideoFrameBuffer(in_vfb_c->data_size)
   {
     memcpy (data, in_vfb_c->data, data_size);
-    sequence_number = in_vfb_c->sequence_number;
-    refcount = in_vfb_c->refcount;
     timestamp = in_vfb_c->timestamp;
     image_type = in_vfb_c->image_type;
   }
@@ -91,10 +89,8 @@ class ImplVideoFrame: public VideoFrame
 
   void Release()
   {
-    if (refcount==1) g_atomic_int_dec_and_test (&(dynamic_cast<ImplVideoFrameBuffer*>(vfb)->refcount));
-    if (dynamic_cast<ImplVideoFrameBuffer*>(vfb)->refcount == 0)
-      delete vfb;
-    g_atomic_int_dec_and_test (&refcount);
+    if (g_atomic_int_dec_and_test (&refcount))
+      delete this;
   }
 
 public:
@@ -184,8 +180,6 @@ private:
   gpointer parent_object;
   gpointer parent_class;
 
-  VideoFrameBuffer* NewFrameBuffer(int size);
-  VideoFrameBuffer* GetFrameBuffer2(int size);
   VideoFrameBuffer* GetFrameBuffer(int size);
 
 };

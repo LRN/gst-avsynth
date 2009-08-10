@@ -130,7 +130,7 @@ gst_avsynth_query_duration (GstPad *pad, AVS_VideoInfo *vi)
           qfmt = GST_FORMAT_DEFAULT;
           if (!gst_pad_query_convert (peer, GST_FORMAT_TIME, time_duration, &qfmt, &duration))
           {
-            GST_WARNING ("Failed to convert duration from time format to default format");
+            GST_INFO ("Failed to convert duration from time format to default format");
             gst_object_unref (peer);
             peer = NULL;
           }

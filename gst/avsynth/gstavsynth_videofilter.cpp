@@ -986,6 +986,9 @@ gst_avsynth_video_filter_framegetter (void *data)
             avsynth_video_filter->vi.fps_numerator);
 #endif
 
+    if (!avsynth_video_filter->impl_cpp && avf)
+      _avs_vf_release (avf);
+
     g_mutex_unlock (avsynth_video_filter->impl_mutex);
     GST_DEBUG_OBJECT (avsynth_video_filter, "Unlocked impl_mutex");
 

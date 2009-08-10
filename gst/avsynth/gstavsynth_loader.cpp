@@ -136,8 +136,6 @@ _avs_loader_se_new (GstPlugin *plugin, gchar *filename, gchar *fullnameprefix)
 void AVSC_CC
 _avs_loader_se_free (AVS_ScriptEnvironment *e)
 {
-  g_free (((AVS_CLoaderData *)e->internal)->filename);
-  g_free (((AVS_CLoaderData *)e->internal)->fullnameprefix);
   g_free (e->internal);
   e->internal = NULL;
   _avs_se_free (e);
@@ -246,10 +244,8 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
   GError *error = NULL;
   gchar **a_plugindirs = NULL;
   gchar **i_plugindirs = NULL;
-  AVS_ScriptEnvironment *env_c;
 
   LoaderScriptEnvironment *env = new LoaderScriptEnvironment();
-  env_c = _avs_loader_se_new(plugin, NULL, NULL);
 
   if (!g_module_supported())
   {
@@ -351,16 +347,17 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
                 g_module_symbol (plugin_module, "avisynth_c_plugin_init@4", (gpointer *) &init_func_c)
             )
             {
+              AVS_ScriptEnvironment *env_c;
               /* Assuming that g_path_get_basename() takes utf-8 string */
               gchar *prefix = g_path_get_basename (full_filename_utf8);
               /* TODO: remove the file extension (if any) */
-              _avs_loader_se_init (env_c, plugin, full_filename_utf8, prefix);
+              env_c = _avs_loader_se_new(plugin, full_filename_utf8, prefix);
     
               GST_LOG ("Entering Init function");
               ret = init_func_c (env_c);
               GST_LOG ("Exited Init function");
+              _avs_loader_se_free (env_c);
               g_free (prefix);
-              
             }
             else
               GST_LOG ("Can't find AvisynthPluginInit2 or AvisynthPluginInit2@4");

@@ -370,7 +370,7 @@ ScriptEnvironment::BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_p
     ThrowError("Filter Error: Attempting to blit an image with negative height.");
   if (row_size<0)
     ThrowError("Filter Error: Attempting to blit an image with negative row size.");
-  BitBlt(dstp, dst_pitch, srcp, src_pitch, row_size, height);
+  ::BitBlt(dstp, dst_pitch, srcp, src_pitch, row_size, height);
 }
 
 /* This function adds a handler for AtExit event, which fires when
@@ -439,18 +439,8 @@ ScriptEnvironment::PlanarChromaAlignment(IScriptEnvironment::PlanarChromaAlignme
   return oldPlanarChromaAlignmentState;
 }
 
-VideoFrameBuffer* ScriptEnvironment::NewFrameBuffer(gint size) {
-  return new ImplVideoFrameBuffer(size);
-}
-
-
-VideoFrameBuffer* ScriptEnvironment::GetFrameBuffer2(gint size) {
-
-  return NewFrameBuffer(size);
-}
-
 VideoFrameBuffer* ScriptEnvironment::GetFrameBuffer(gint size) {
-  ImplVideoFrameBuffer* result = (ImplVideoFrameBuffer *) GetFrameBuffer2(size);
+  ImplVideoFrameBuffer* result = (ImplVideoFrameBuffer *) new ImplVideoFrameBuffer(size);
 
   if (!result || !result->data) {
     // Damn! we got a NULL from malloc

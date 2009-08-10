@@ -22,8 +22,14 @@
 #include <avsynth/gstavsynth_sdk_cpp.h>
 
 #ifdef DEINTERLACE_MMX_BUILD
+#ifdef _MSC_VER
 #pragma warning(disable:4799)
-void __declspec(naked) asm_deinterlaceYUY2(const unsigned char *dstp, const unsigned char *p,
+#endif
+void
+#ifdef _MSC_VER
+__declspec(naked)
+#endif
+asm_deinterlaceYUY2(const unsigned char *dstp, const unsigned char *p,
 								  const unsigned char *n, unsigned char *fmask,
 								  unsigned char *dmask, int thresh, int dthresh, int row_size)
 {
@@ -234,7 +240,11 @@ xloop:
 #endif
 }
 
-void __declspec(naked) asm_deinterlace_chromaYUY2(const unsigned char *dstp, const unsigned char *p,
+void
+#ifdef _MSC_VER
+__declspec(naked)
+#endif
+asm_deinterlace_chromaYUY2(const unsigned char *dstp, const unsigned char *p,
 								  const unsigned char *n, unsigned char *fmask,
 								  unsigned char *dmask, int thresh, int dthresh, int row_size)
 {
@@ -464,12 +474,20 @@ xloop:
 	);
 #endif
 }
+#ifdef _MSC_VER
 #pragma warning(default:4799)
+#endif
 #endif
 
 #ifdef BLEND_MMX_BUILD
+#ifdef _MSC_VER
 #pragma warning(disable:4799)
-int __declspec(naked) blendYUY2(const unsigned char *dstp, const unsigned char *cprev,
+#endif
+int
+#ifdef _MSC_VER
+__declspec(naked)
+#endif
+blendYUY2(const unsigned char *dstp, const unsigned char *cprev,
 								const unsigned char *cnext, unsigned char *finalp,
 								unsigned char *dmaskp, int count)
 {
@@ -600,13 +618,22 @@ skip:
 	:	"mm0", "mm2", "mm1", "memory", "ebx", "ecx", "esi", "edx", "mm6", "edi", "mm7", "eax"
 	);
 #endif
+  return 0; /* This preven GCC from complaining that "control reaches end of non-void function" */
 }
+#ifdef _MSC_VER
 #pragma warning(default:4799)
+#endif
 #endif
 
 #ifdef INTERPOLATE_MMX_BUILD
+#ifdef _MSC_VER
 #pragma warning(disable:4799)
-int __declspec(naked) interpolateYUY2(const unsigned char *dstp, const unsigned char *cprev,
+#endif
+int
+#ifdef _MSC_VER
+__declspec(naked)
+#endif
+interpolateYUY2(const unsigned char *dstp, const unsigned char *cprev,
 								const unsigned char *cnext, unsigned char *finalp,
 								unsigned char *dmaskp, int count)
 {
@@ -722,7 +749,10 @@ skip:
 	:	"mm0", "mm1", "memory", "ebx", "ecx", "esi", "edx", "edi", "mm7", "eax"
 	);
 #endif
+  return 0; /* This preven GCC from complaining that "control reaches end of non-void function" */
 }
+#ifdef _MSC_VER
 #pragma warning(default:4799)
+#endif
 #endif
 

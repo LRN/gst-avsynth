@@ -1,10 +1,4 @@
 /*
- * GStreamer:
- * Copyright (C) 1999 Erik Walthinsen <omega@cse.ogi.edu>
- *
- * AviSynth:
- * Copyright (C) 2007 Ben Rudiak-Gould et al.
- *
  * GstAVSynth:
  * Copyright (C) 2009 LRN <lrn1986 _at_ gmail _dot_ com>
  *

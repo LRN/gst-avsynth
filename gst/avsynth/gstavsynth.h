@@ -1,11 +1,4 @@
 /*
- * GStreamer:
- * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
- * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
- *
- * AviSynth:
- * Copyright (C) 2007 Ben Rudiak-Gould et al.
- *
  * GstAVSynth:
  * Copyright (C) 2009 LRN <lrn1986 _at_ gmail _dot_ com>
  *

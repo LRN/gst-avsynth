@@ -1,8 +1,4 @@
 /*
- * GStreamer:
- * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
- * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
- *
  * AviSynth:
  * Copyright (C) 2007 Ben Rudiak-Gould et al.
  *
@@ -53,11 +49,13 @@ public:
   }
 
   ~ImplVideoFrameBuffer() {
+/* FROM_AVISYNTH_BEGIN */
     _ASSERTE(refcount == 0);
     g_atomic_int_inc (&sequence_number); // HACK : Notify any children with a pointer, this buffer has changed!
     if (data) delete[] data;
     data = 0; // and mark it invalid !
     data_size = 0;   // and don't forget to set the size to 0 as well!
+/* FROM_AVISYNTH_END */
   }
 
   ImplVideoFrameBuffer(AVS_VideoFrameBuffer *in_vfb_c):VideoFrameBuffer(in_vfb_c->data_size)

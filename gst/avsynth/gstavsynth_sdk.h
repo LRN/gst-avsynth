@@ -1,12 +1,8 @@
 /*
- * GStreamer:
- * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
- * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
- *
  * AviSynth C Interface:
  * Copyright (C) 2003 Kevin Atkinson
  *
- * GstAVSynth:
+ * GstAVSynth C Interface:
  * Copyright (C) 2009 LRN <lrn1986 _at_ gmail _dot_ com>
  *
  * 

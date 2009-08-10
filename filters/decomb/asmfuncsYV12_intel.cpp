@@ -20,9 +20,9 @@
 */
 #include "version.h"
 #include "asmfuncsYV12.h"
-
+#ifdef _MSC_VER
 #pragma warning(disable:4799)
-
+#endif
 #ifdef DEINTERLACE_MMX_BUILD
 
 /*********************
@@ -943,7 +943,8 @@ endframe:
 }
 
 
-
+#ifdef _MSC_VER
 #pragma warning(default:4799)
+#endif
 #endif
 

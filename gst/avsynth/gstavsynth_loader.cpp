@@ -1,11 +1,4 @@
 /*
- * GStreamer:
- * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
- * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
- *
- * AviSynth:
- * Copyright (C) 2007 Ben Rudiak-Gould et al.
- *
  * GstAVSynth:
  * Copyright (C) 2009 LRN <lrn1986 _at_ gmail _dot_ com>
  *
@@ -332,7 +325,6 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
             {
               /* Assuming that g_path_get_basename() takes utf-8 string */
               gchar *prefix = g_path_get_basename (full_filename_utf8);
-              /* TODO: remove the file extension (if any) */
               env->SetFilename (full_filename_utf8);
               env->SetPrefix (prefix);
               env->SetPlugin (plugin);

@@ -1,8 +1,4 @@
 /*
- * GStreamer:
- * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
- * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
- *
  * AviSynth:
  * Copyright (C) 2007 Ben Rudiak-Gould et al.
  *
@@ -54,8 +50,9 @@ extern gchar *plugindir_var;
 AlignPlanar must be applied after a filter that forces an alignment (that is less than default alignment), that filter applies it by itself,
 that is why AlignPlanar API is public.
 However, this is kinda useless, because GstAVSynth will re-align frames by itself,
-and there is no other AviSynth filters attached.
+and there are no other AviSynth filters attached (since scripting is not implemented).
 */
+/* FROM_AVISYNTH_BEGIN */
 AlignPlanar::AlignPlanar(PClip _clip) : GenericVideoFilter(_clip) {}
 
 PVideoFrame
@@ -140,6 +137,7 @@ PClip FillBorder::Create(PClip clip)
   else
     return new FillBorder(clip);
 }
+/* FROM_AVISYNTH_END */
 
 ScriptEnvironment::ScriptEnvironment (gpointer parent)
 {
@@ -235,6 +233,7 @@ ScriptEnvironment::FunctionExists(const char* name)
 /* Both NewVideoFrame methods are GPL */
 PVideoFrame __stdcall
 ScriptEnvironment::NewVideoFrame(const VideoInfo& vi, int align) {
+/* FROM_AVISYNTH_BEGIN */
   // Check requested pixel_type:
   switch (vi.pixel_type) {
     case VideoInfo::CS_BGR24:
@@ -264,12 +263,14 @@ ScriptEnvironment::NewVideoFrame(const VideoInfo& vi, int align) {
     }
     return NewVideoFrame(vi.RowSize(), vi.height, align);
   }
+/* FROM_AVISYNTH_END */
 }
 
 PVideoFrame
 ScriptEnvironment::NewVideoFrame (int row_size, int height, int align)
 {
   VideoFrameBuffer* vfb;
+/* FROM_AVISYNTH_BEGIN */
   const int pitch = (row_size+align-1) / align * align;
   const int size = pitch * height;
   const int _align = (align < FRAME_ALIGN) ? FRAME_ALIGN : align;
@@ -278,6 +279,7 @@ ScriptEnvironment::NewVideoFrame (int row_size, int height, int align)
     ThrowError("NewVideoFrame: Returned 0 image pointer!");
   const gsize offset = (-gsize(vfb->GetWritePtr())) & (FRAME_ALIGN-1);  // align first line offset  (alignment is free here!)
   return new ImplVideoFrame(vfb, offset, pitch, row_size, height);
+/* FROM_AVISYNTH_END */
 }
 
 /* NewPlanarVideoFrame is GPL */

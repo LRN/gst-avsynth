@@ -1,8 +1,4 @@
 /*
- * GStreamer:
- * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
- * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
- *
  * AviSynth:
  * Copyright (C) 2007 Ben Rudiak-Gould et al.
  *
@@ -47,28 +43,13 @@ G_END_DECLS
 
 gchar *plugindir_var = NULL;
 
-/*
-class C_VideoFilter : public IClip {
-public: // but don't use
-  AVS_Clip child;
-  AVS_ScriptEnvironment env;
-  AVS_FilterInfo d;
-public:
-  C_VideoFilter() {memset(&d,0,sizeof(d)); _avs_script_environment_init (&env); }
-  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
-  void __stdcall GetAudio(void * buf, __int64 start, __int64 count, IScriptEnvironment* env);
-  const VideoInfo & __stdcall GetVideoInfo();
-  bool __stdcall GetParity(int n);
-  void __stdcall SetCacheHints(int cachehints,int frame_range);
-  __stdcall ~C_VideoFilter();
-};
-*/
-
 void BitBlt(guint8* dstp, int dst_pitch, const guint8* srcp, int src_pitch, int row_size, int height) {
+/* FROM_AVISYNTH_BEGIN */
   if ((!height) || (!row_size)) return;
   if (height == 1 || (dst_pitch == src_pitch && src_pitch == row_size)){
     memcpy(dstp, srcp, row_size * height);
   } else {
+/* FROM_AVISYNTH_END */
 #if HAVE_ORC
     static OrcProgram *p = NULL;
     OrcExecutor _ex;
@@ -237,6 +218,7 @@ int AVSC_CC
 _avs_vf_get_row_size_p(const AVS_VideoFrame *p, int plane)
 { 
   int r;
+/* FROM_AVISYNTH_BEGIN */
   switch (plane)
   {
     case PLANAR_U:
@@ -262,6 +244,7 @@ _avs_vf_get_row_size_p(const AVS_VideoFrame *p, int plane)
       return p->row_size;
   }
   return p->row_size;
+/* FROM_AVISYNTH_END */
 }
 
 
@@ -275,6 +258,7 @@ _avs_vf_get_height(const AVS_VideoFrame *p)
 int AVSC_CC
 _avs_vf_get_height_p(const AVS_VideoFrame *p, int plane)
 {
+/* FROM_AVISYNTH_BEGIN */
   switch (plane)
   {
     case PLANAR_U:
@@ -284,6 +268,7 @@ _avs_vf_get_height_p(const AVS_VideoFrame *p, int plane)
       return 0;
   }
   return p->height;
+/* FROM_AVISYNTH_END */
 }
 
 
@@ -402,83 +387,11 @@ _avs_vf_copy(AVS_VideoFrame * p)
   return fnew;
 }
 */
-/////////////////////////////////////////////////////////////////////
-//
-// C_VideoFilter
-//
-/*
-PVideoFrame
-C_VideoFilter::GetFrame(int n, IScriptEnvironment* env) 
-{
-  if (d.get_frame) {
-    d.error = NULL;
-    AVS_VideoFrame * f = d.get_frame(&d, n);
-    if (d.error)
-      throw AvisynthError(d.error);
-    PVideoFrame fr((VideoFrame *)f);
-    ((PVideoFrame *)&f)->~PVideoFrame();  
-    return fr;
-  } else {
-    return d.child->clip->GetFrame(n, env); 
-  }
-}
 
-void __stdcall
-C_VideoFilter::GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env) 
-{
-  if (d.get_audio) {
-    d.error = NULL;
-    d.get_audio(&d, buf, start, count);
-    if (d.error)
-      throw AvisynthError(d.error);
-  } else {
-    d.child->clip->GetAudio(buf, start, count, env);
-  }
-}
-
-const VideoInfo& __stdcall
-C_VideoFilter::GetVideoInfo() 
-{
-  return *(VideoInfo *)&d.vi; 
-}
-
-bool __stdcall
-C_VideoFilter::GetParity(int n) 
-{
-  if (d.get_parity) {
-    d.error = NULL;
-    int res = d.get_parity(&d, n);
-    if (d.error)
-      throw AvisynthError(d.error);
-    return !!res;
-  } else {
-    return d.child->clip->GetParity(n);
-  }
-}
-
-void __stdcall
-C_VideoFilter::SetCacheHints(int cachehints, int frame_range) 
-{
-  if (d.set_cache_hints) {
-    d.error = NULL;
-    d.set_cache_hints(&d, cachehints, frame_range);
-    if (d.error)
-      throw AvisynthError(d.error);
-  }
-  // We do not pass cache requests upwards, only to the next filter.
-}
-
-C_VideoFilter::~C_VideoFilter()
-{
-  if (d.free_filter)
-    d.free_filter(&d);
-}
-*/
-
-/////////////////////////////////////////////////////////////////////
-//
-// AVS_GenericVideoFilter
-//
+/***********
+ *
+ * AVS_GenericVideoFilter
+ */
 
 void AVSC_CC
 _avs_gvf_destroy (AVS_Clip *p, gboolean freeself)
@@ -563,10 +476,10 @@ _avs_gvf_set_cache_hints (AVS_Clip *p, gint cachehints, gint64 frame_range)
   /* Not implemented */
 }
 
-/////////////////////////////////////////////////////////////////////
-//
-// AVS_Clip
-//
+/***************
+ *
+ * AVS_Clip
+ */
 
 void AVSC_CC
 _avs_clip_release (AVS_Clip * p)
@@ -798,63 +711,6 @@ _avs_val_new_array(gint size)
   return v;
 }
 
-/*
-AVS_Clip * AVSC_CC
-_avs_new_c_filter(AVS_ScriptEnvironment * e,
-                 AVS_FilterInfo * * fi,
-                 AVS_Value child, int store_child)
-{
-  AVS_Clip *nc = _avs_clip_construct (
-  C_VideoFilter * f = new C_VideoFilter();
-  AVS_Clip * ff = new AVS_Clip();
-  ff->clip = f;
-  ff->env  = (IScriptEnvironment *) e->env;
-  f->env.env = e->env;
-  f->d.env = &f->env;
-  if (store_child) {
-    _ASSERTE(child.type == 'c');
-    f->child.clip = (IClip *)child.d.clip;
-    f->child.env  = (IScriptEnvironment *) e->env;
-    f->d.child = &f->child;
-  }
-  *fi = &f->d;
-  if (child.type == 'c')
-    f->d.vi = *(const AVS_VideoInfo *)(&((IClip *)child.d.clip)->GetVideoInfo());
-  return ff;
-}
-*/
-
-/////////////////////////////////////////////////////////////////////
-//
-// AVS_ScriptEnvironment::add_function
-//
-/*
-struct C_VideoFilter_UserData {
-  void * user_data;
-  AVSApplyFunc func;
-};
-
-AVSValue __cdecl
-create_c_video_filter(AVSValue args, void * user_data,
-                      IScriptEnvironment * e0)
-{
-  C_VideoFilter_UserData * d = (C_VideoFilter_UserData *)user_data;
-  AVS_ScriptEnvironment env;
-  _avs_script_environment_init (&env, e0);
-//OutputDebugString("OK");
-  AVS_Value res = (d->func)(&env, *(AVS_Value *)&args, d->user_data);
-  if (res.type == 'e') {
-    throw AvisynthError(res.d.string);
-  } else {
-    AVSValue val;
-    val = (*(const AVSValue *)&res);
-    ((AVSValue *)&res)->~AVSValue();
-    return val;
-  }
-}
-*/
-
-
 
 /**********
  *
@@ -934,7 +790,7 @@ _avs_se_function_exists(AVS_ScriptEnvironment * p, const char * name)
 }
 
 AVS_Value AVSC_CC
-_avs_se_invoke(AVS_ScriptEnvironment * p, const char * name, AVS_Value args, const char * * arg_names)
+_avs_se_invoke(AVS_ScriptEnvironment * p, const char * name, AVS_Value args, const char **arg_names)
 {
   AVS_Value v = {0,0};
   p->error = _avs_se_save_string(p, "_avs_invoke: Not implemented", -1);
@@ -989,6 +845,7 @@ _avs_vf_construct (AVS_VideoFrameBuffer *_vfb, gint _offset, gint _pitch, gint _
 gboolean AVSC_CC
 _avs_se_planar_chroma_alignment_state (AVS_ScriptEnvironment *p, gint key)
 {
+/* FROM_AVISYNTH_BEGIN */
   gboolean oldPlanarChromaAlignmentState = ((GstAVSynthVideoFilter *)p->internal)->PlanarChromaAlignmentState;
 
   switch (key)
@@ -1007,12 +864,14 @@ _avs_se_planar_chroma_alignment_state (AVS_ScriptEnvironment *p, gint key)
       break;
   }
   return oldPlanarChromaAlignmentState;
+/* FROM_AVISYNTH_END */
 }
 
 
 AVS_VideoFrame * AVSC_CC
 _avs_vf_new_p (AVS_ScriptEnvironment *p, gint width, gint height, gint align, gboolean U_first)
 {
+/* FROM_AVISYNTH_BEGIN */
   int UVpitch, Uoffset, Voffset, pitch, diff;
   AVS_VideoFrameBuffer* vfb;
   int size, _align;
@@ -1056,6 +915,7 @@ _avs_vf_new_p (AVS_ScriptEnvironment *p, gint width, gint height, gint align, gb
     Voffset = offset + pitch * height;
     Uoffset = offset + pitch * height + UVpitch * (height >> 1);
   }
+/* FROM_AVISYNTH_END */
   return _avs_vf_construct (vfb, offset, pitch, width, height, Uoffset, Voffset, UVpitch);
 }
 
@@ -1063,6 +923,7 @@ AVS_VideoFrame *
 _avs_vf_new (AVS_ScriptEnvironment *p, gint row_size, gint height, gint align)
 {
   AVS_VideoFrameBuffer *vfb;
+/* FROM_AVISYNTH_BEGIN */
   gint pitch, size, _align;
   gsize offset;
   pitch = (row_size + align - 1) / align * align;
@@ -1076,6 +937,7 @@ _avs_vf_new (AVS_ScriptEnvironment *p, gint row_size, gint height, gint align)
     return NULL;
   }
   offset = (-gsize (vfb->data)) & (AVS_FRAME_ALIGN - 1);  // align first line offset  (alignment is free here!)
+/* FROM_AVISYNTH_END */
   return _avs_vf_construct (vfb, offset, pitch, row_size, height, 0, 0, 0);
 }
 
@@ -1085,7 +947,7 @@ _avs_se_vf_new_a(AVS_ScriptEnvironment *p, const AVS_VideoInfo * vi, gint align)
 {
   AVS_VideoFrame *vf = NULL;
   p->error = NULL;
-
+/* FROM_AVISYNTH_BEGIN */
   switch (vi->pixel_type) {
     case AVS_CS_BGR24:
     case AVS_CS_BGR32:
@@ -1121,6 +983,7 @@ _avs_se_vf_new_a(AVS_ScriptEnvironment *p, const AVS_VideoInfo * vi, gint align)
     }
     vf = _avs_vf_new (p, AVS_ROW_SIZE(vi), vi->height, align);
   }
+/* FROM_AVISYNTH_END */
   if (vf)
     _avs_vf_ref (vf);
   return vf;
@@ -1134,7 +997,7 @@ _avs_se_make_vf_writable(AVS_ScriptEnvironment *p, AVS_VideoFrame **pvf)
   AVS_VideoFrame *vf = *pvf;
 
   p->error = NULL;
-
+/* FROM_AVISYNTH_BEGIN */
   // If the frame is already writable, do nothing.
   if (_avs_vf_is_writable (vf)) {
     return 0;
@@ -1157,6 +1020,7 @@ _avs_se_make_vf_writable(AVS_ScriptEnvironment *p, AVS_VideoFrame **pvf)
   _avs_se_bit_blt (p, _avs_vf_get_write_ptr_p (dst, PLANAR_V), _avs_vf_get_pitch_p (dst, PLANAR_V), _avs_vf_get_read_ptr_p (vf, PLANAR_V), _avs_vf_get_pitch_p (vf, PLANAR_V), _avs_vf_get_row_size_p (vf, PLANAR_V), _avs_vf_get_height_p (vf, PLANAR_V));
 
   *pvf = dst;
+/* FROM_AVISYNTH_END */
   return 1;
 }
 
@@ -1236,76 +1100,4 @@ _avs_se_set_working_dir(AVS_ScriptEnvironment * p, const char * newdir)
   return 0;
 }
 
-
-/* This is not implemented (required only for scripting, which is NOT implemented too)
-
-AVSValue __cdecl
-load_c_plugin(AVSValue args, void * user_data, 
-              IScriptEnvironment * env)
-{
-  const char * filename = args[0].AsString();
-  HMODULE plugin = LoadLibrary(filename);
-  if (!plugin)
-    env->ThrowError("Unable to load C Plugin: %s", filename);
-  AvisynthCPluginInitFunc func = 0;
-#ifndef AVSC_USE_STDCALL
-  func = (AvisynthCPluginInitFunc)GetProcAddress(plugin, "avisynth_c_plugin_init");
-#else // AVSC_USE_STDCALL
-  func = (AvisynthCPluginInitFunc)GetProcAddress(plugin, "avisynth_c_plugin_init@4");
-  if (!func)
-    func = (AvisynthCPluginInitFunc)GetProcAddress(plugin, "avisynth_c_plugin_init");
-#endif // AVSC_USE_STDCALL
-  if (!func)
-    env->ThrowError("Not An Avisynth 2 C Plugin: %s", filename);
-  AVS_ScriptEnvironment e;
-  _avs_script_environment (&e);
-  e.env = env;
-  AVS_ScriptEnvironment *pe;
-  pe = &e;
-  const char *s = NULL;
-  int callok = 1; // (stdcall)
-  __asm // Tritical - Jan 2006
-  {
-    push eax
-    push edx
-
-    push 0x12345678    // Stash a known value
-
-    mov eax, pe      // Env pointer
-    push eax      // Arg1
-    call func      // avisynth_c_plugin_init
-
-    lea edx, s      // return value is in eax
-    mov DWORD PTR[edx], eax
-
-    pop eax        // Get top of stack
-    cmp eax, 0x12345678  // Was it our known value?
-    je end        // Yes! Stack was cleaned up, was a stdcall
-
-    lea edx, callok
-    mov BYTE PTR[edx], 0 // Set callok to 0 (_cdecl)
-
-    pop eax        // Get 2nd top of stack
-    cmp eax, 0x12345678  // Was this our known value?
-    je end        // Yes! Stack is now correctly cleaned up, was a _cdecl
-
-    mov BYTE PTR[edx], 2 // Set callok to 2 (bad stack)
-end:
-    pop edx
-    pop eax
-  }
-  if (callok == 2)
-    env->ThrowError("Avisynth 2 C Plugin '%s' has corrupted the stack.", filename);
-#ifndef AVSC_USE_STDCALL
-  if (callok != 0)
-    env->ThrowError("Avisynth 2 C Plugin '%s' has wrong calling convention! Must be _cdecl.", filename);
-#else // AVSC_USE_STDCALL
-  if (callok != 1)
-    env->ThrowError("Avisynth 2 C Plugin '%s' has wrong calling convention! Must be stdcall.", filename);
-#endif // AVSC_USE_STDCALL
-  if (s == 0)
-    env->ThrowError("Avisynth 2 C Plugin '%s' returned a NULL pointer.", filename);
-  return AVSValue(s);
-}
-*/
 

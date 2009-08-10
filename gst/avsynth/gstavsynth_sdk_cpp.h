@@ -1,8 +1,4 @@
 /*
- * GStreamer:
- * Copyright (C) 2005 Thomas Vander Stichele <thomas@apestaart.org>
- * Copyright (C) 2005 Ronald S. Bultje <rbultje@ronald.bitfreak.net>
- *
  * AviSynth:
  * Copyright (C) 2007 Ben Rudiak-Gould et al.
  *
@@ -53,9 +49,6 @@ enum { AVISYNTH_INTERFACE_VERSION = 3 };
 /* Define all types necessary for interfacing with avisynth
    Moved from internal.h */
 
-/* Since GstAVSynth is cross-platform, we shouldn't link to windows headers. */
-// Win32 API macros, notably the types BYTE, DWORD, ULONG, etc.
-//#include <windef.h>
 #include <stdint.h>
 #include <string.h>
 #include <glib.h>
@@ -190,8 +183,6 @@ typedef guint32	PixOffset;
 // information that does not depend on the frame number).  The GetVideoInfo
 // method in IClip returns this struct.
 
-/* We don't have audio support in GstAVSynth...yet. */
-/*
 // Audio Sample information
 typedef float SFLOAT;
 
@@ -200,7 +191,6 @@ enum {SAMPLE_INT8  = 1<<0,
       SAMPLE_INT24 = 1<<2,    // Int24 is a very stupid thing to code, but it's supported by some hardware.
       SAMPLE_INT32 = 1<<3,
       SAMPLE_FLOAT = 1<<4};
-*/
 
 enum {
    PLANAR_Y=1<<0,
@@ -311,7 +301,6 @@ struct VideoInfo {
 
   int BytesPerChannelSample() const {
     switch (sample_type) {
-/*
     case SAMPLE_INT8:
       return sizeof(signed char);
     case SAMPLE_INT16:
@@ -322,7 +311,6 @@ struct VideoInfo {
       return sizeof(signed int);
     case SAMPLE_FLOAT:
       return sizeof(SFLOAT);
-*/
     default:
       _ASSERTE("Sample type not recognized!");
       return 0;
@@ -473,8 +461,6 @@ protected:
     offset(_offset), pitch(_pitch), row_size(_row_size), height(_height), offsetU(_offsetU), offsetV(_offsetV), pitchUV(_pitchUV), vfb(_vfb), refcount(0)
   {}
 
-  /* Not yet overloaded in GstAVSynth */
-  //void* operator new(unsigned size);
 // TESTME: OFFSET U/V may be switched to what could be expected from AVI standard!
 public:
   int GetPitch() const { return pitch; }
@@ -775,52 +761,6 @@ public:
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 };
 
-
-
-/* No audio support in GstAVSynth yet */
-/*
-class ConvertAudio : public GenericVideoFilter
-// Helper class to convert audio to any format
-{
-public:
-  ConvertAudio(PClip _clip, int prefered_format);
-  void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env);
-  void __stdcall SetCacheHints(int cachehints,int frame_range);  // We do pass cache requests upwards, to the cache!
-
-  static PClip Create(PClip clip, int sample_type, int prefered_type);
-  static AVSValue __cdecl Create_float(AVSValue args, void*, IScriptEnvironment*);
-  static AVSValue __cdecl Create_32bit(AVSValue args, void*, IScriptEnvironment*);
-  static AVSValue __cdecl Create_24bit(AVSValue args, void*, IScriptEnvironment*);
-  static AVSValue __cdecl Create_16bit(AVSValue args, void*, IScriptEnvironment*);
-  static AVSValue __cdecl Create_8bit (AVSValue args, void*, IScriptEnvironment*);
-  static AVSValue __cdecl Create_Any  (AVSValue args, void*, IScriptEnvironment*);
-  virtual ~ConvertAudio();
-
-private:
-  void convertToFloat(char* inbuf, float* outbuf, char sample_type, int count);
-  void convertToFloat_3DN(char* inbuf, float* outbuf, char sample_type, int count);
-  void convertToFloat_SSE(char* inbuf, float* outbuf, char sample_type, int count);
-  void convertToFloat_SSE2(char* inbuf, float* outbuf, char sample_type, int count);
-  void convertFromFloat(float* inbuf, void* outbuf, char sample_type, int count);
-  void convertFromFloat_3DN(float* inbuf, void* outbuf, char sample_type, int count);
-  void convertFromFloat_SSE(float* inbuf, void* outbuf, char sample_type, int count);
-  void convertFromFloat_SSE2(float* inbuf, void* outbuf, char sample_type, int count);
-
-  __inline int Saturate_int8(float n);
-  __inline short Saturate_int16(float n);
-  __inline int Saturate_int24(float n);
-  __inline int Saturate_int32(float n);
-
-  char src_format;
-  char dst_format;
-  int src_bps;
-  char *tempbuffer;
-  SFLOAT *floatbuffer;
-  int tempbuffer_size;
-};
-
-*/
-
 // For GetCPUFlags.  These are backwards-compatible with those in VirtualDub.
 enum {
                     /* slowest CPU to support extension */
@@ -905,13 +845,6 @@ public:
 
   virtual PVideoFrame __stdcall SubframePlanar(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV) = 0;
 };
-
-
-// avisynth.dll exports this; it's a way to use it as a library, without
-// writing an AVS script or without going through AVIFile.
-/* But for GstAVSynth it's kinda useless */
-/* IScriptEnvironment* __stdcall CreateScriptEnvironment(int version = AVISYNTH_INTERFACE_VERSION); */
-
 
 #pragma pack(pop)
 

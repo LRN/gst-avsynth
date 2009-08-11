@@ -303,8 +303,7 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
   
       if ((full_filename = g_filename_from_utf8 (full_filename_utf8, -1, NULL, NULL, NULL)))
       {
-        /* FIXME: use more sophisticated check (suppress "not-a-dll" error messages?) */
-        /* What about portability? */
+        /* FIXME: use more sophisticated check (suppress "not-a-dll" error messages and load each file blindly?) */
         if (g_str_has_suffix (full_filename, G_MODULE_SUFFIX))
         {
           GModule *plugin_module = NULL;
@@ -315,6 +314,8 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
             AvisynthPluginInitFunc init_func;
             AvisynthCPluginInitFunc init_func_c;
             const char *ret = NULL;
+            /* Assuming that g_path_get_basename() takes utf-8 string */
+            gchar *prefix = g_path_get_basename (full_filename_utf8);
     
             GST_LOG ("Opened %s", full_filename_utf8);
              
@@ -323,8 +324,6 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
                  g_module_symbol (plugin_module, "AvisynthPluginInit2@4", (gpointer *) &init_func)
               )
             {
-              /* Assuming that g_path_get_basename() takes utf-8 string */
-              gchar *prefix = g_path_get_basename (full_filename_utf8);
               env->SetFilename (full_filename_utf8);
               env->SetPrefix (prefix);
               env->SetPlugin (plugin);
@@ -332,7 +331,6 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
               GST_LOG ("Entering Init function");
               ret = init_func (env);
               GST_LOG ("Exited Init function");
-              g_free (prefix);
             }
             else if (
                 g_module_symbol (plugin_module, "avisynth_c_plugin_init", (gpointer *) &init_func_c) ||
@@ -340,19 +338,16 @@ gst_avsynth_video_filter_register (GstPlugin * plugin, gchar *plugindirs)
             )
             {
               AVS_ScriptEnvironment *env_c;
-              /* Assuming that g_path_get_basename() takes utf-8 string */
-              gchar *prefix = g_path_get_basename (full_filename_utf8);
-              /* TODO: remove the file extension (if any) */
               env_c = _avs_loader_se_new(plugin, full_filename_utf8, prefix);
     
               GST_LOG ("Entering Init function");
               ret = init_func_c (env_c);
               GST_LOG ("Exited Init function");
               _avs_loader_se_free (env_c);
-              g_free (prefix);
             }
             else
               GST_LOG ("Can't find AvisynthPluginInit2 or AvisynthPluginInit2@4");
+            g_free (prefix);
             g_module_close (plugin_module);
           }
           else

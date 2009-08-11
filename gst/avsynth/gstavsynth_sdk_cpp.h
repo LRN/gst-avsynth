@@ -776,9 +776,6 @@ enum {
                                //          only Hammer will have anyway)
   CPUF_SSE3         = 0x100,   //  PIV+, Hammer
 };
-#define MAX_INT 0x7fffffff
-#define MIN_INT -0x7fffffff  // ::FIXME:: research why this is not 0x80000000
-
 
 class IScriptEnvironment {
 public:

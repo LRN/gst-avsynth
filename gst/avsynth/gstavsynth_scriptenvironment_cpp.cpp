@@ -199,12 +199,15 @@ ScriptEnvironment::ThrowError (const char* fmt, ...)
   va_end(val);
 
   /*
-   * FIXME : This should raise a GST_ERROR on the pipeline bus ! 
+   * TODO : This should raise a GST_ERROR on the pipeline bus ! 
    * Having filters raise errors and segfault the whole application might be
    * considered acceptable behaviour on win32/avisynth BUT NOT IN GSTREAMER !
+   *
+   * Now it does. Still, it is not a perfect solution: filters will expect
+   * AviSynthError to be caught and handled or to kill AviSynth.
    */
-
-  throw AvisynthError(ScriptEnvironment::SaveString (buf));
+  GST_ERROR_OBJECT (this->parent_object, "AvisynthError: %s", buf);
+  //throw AvisynthError(ScriptEnvironment::SaveString (buf));
 }
 
 void
@@ -223,11 +226,7 @@ ScriptEnvironment::AddFunction(const char* name, const char* paramstr, const cha
 bool
 ScriptEnvironment::FunctionExists(const char* name)
 {
-  /* FIXME: add "avsynth" */
-  if (g_type_from_name ((gchar *) name))
-    return true;
-  else
-    return false;
+  return _avs_se_function_exists (env_c, name);
 }
 
 /* Both NewVideoFrame methods are GPL */
@@ -456,7 +455,7 @@ VideoFrameBuffer* ScriptEnvironment::GetFrameBuffer(gint size) {
 AVSValue
 ScriptEnvironment::Invoke(const char* name, const AVSValue args, const char** arg_names)
 {
-  /* FIXME: thow exception? Since we won't implement this function */
+  /* Not implemented, used only by scripts */
   return NULL;
 }
 
@@ -473,32 +472,32 @@ ScriptEnvironment::GetVar(const char* name)
 bool
 ScriptEnvironment::SetVar(const char* name, const AVSValue& val)
 {
-  /* TODO: implement simple variable table? */
+  /* Rarely used by plugins. Will be implemented when a need arises. */
   return false;
 }
 
 bool
 ScriptEnvironment::SetGlobalVar(const char* name, const AVSValue& val)
 {
-  /* TODO: implement simple variable table? */
+  /* Rarely used by plugins. Will be implemented when a need arises. */
   return false;
 }
 
 void
 ScriptEnvironment::PushContext(int level)
 {
-  /* FIXME: thow exception? Since we won't implement this function */
+  /* Not implemented, used only by scripts */
 }
 
 void
 ScriptEnvironment::PopContext()
 {
-  /* FIXME: thow exception? Since we won't implement this function */
+  /* Not implemented, used only by scripts */
 }
 
 void
 ScriptEnvironment::PopContextGlobal()
 {
-  /* FIXME: thow exception? Since we won't implement this function */
+  /* Not implemented, used only by scripts */
   return;
 }

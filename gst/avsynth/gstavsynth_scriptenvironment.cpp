@@ -738,7 +738,7 @@ glong AVSC_CC
 _avs_se_get_cpu_flags(AVS_ScriptEnvironment * p)
 {
   p->error = NULL;
-  /* FIXME: add cpuflags detection */
+  /* Not implemented. Either use ORC/LIBOIL (even if only for CPU detection), or use plain C */
   return 0;
 }
 
@@ -781,12 +781,16 @@ _avs_se_vsprintf(AVS_ScriptEnvironment * p, const char* fmt, va_list val)
 int AVSC_CC
 _avs_se_function_exists(AVS_ScriptEnvironment * p, const char * name)
 {
+  gboolean ret = FALSE;
+  gchar *avs_string = NULL;
   p->error = NULL;
-  /* FIXME: add "avsynth" */
-  if (g_type_from_name ((gchar *) name))
-    return true;
+  avs_string = g_strdup_printf ("%s_%s", "avsynth", name);
+  if (g_type_from_name (avs_string))
+    ret = TRUE;
   else
-    return false;
+    ret = FALSE;
+  g_free (avs_string);
+  return ret;
 }
 
 AVS_Value AVSC_CC
@@ -1088,7 +1092,10 @@ _avs_se_subframe_p(AVS_ScriptEnvironment * p, AVS_VideoFrame * src0,
 int AVSC_CC
 _avs_se_set_memory_max(AVS_ScriptEnvironment * p, int mem)
 {
-  /* FIXME: implement */
+  /* Not implemented. AviSynth automatically sets max memory limit
+   * (GstAVSynth should do that too). SetMemoryMax is only used in
+   * scripts, but since we have no scripting support...
+   */
   return 0;
 }
 
@@ -1096,7 +1103,7 @@ _avs_se_set_memory_max(AVS_ScriptEnvironment * p, int mem)
 int AVSC_CC
 _avs_se_set_working_dir(AVS_ScriptEnvironment * p, const char * newdir)
 {
-  /* FIXME: implement */
+  /* Not implemented. Used only by scripts. */
   return 0;
 }
 

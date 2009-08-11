@@ -97,7 +97,16 @@ _avs_vcf_construct (AVS_VideoCacheFilter *p, AVS_VideoInfo init_vi, GstPad *in_p
 void AVSC_CC
 _avs_vcf_resize (AVS_VideoCacheFilter *p, gint64 newsize)
 {
-  /* FIXME: implement memory limitation */
+  /* There is no memory limits at the moment. GstAVSynth will not
+   * keep the frames that were not used since the last GetFrame() call,
+   * and will not allocate more than 3 times as much memory as it needed
+   * to keep the number of frames that was requested during the last GetFrame()
+   * call. I'm estimating that restricing memory to be lower than that amount
+   * due to low amount of physical memory will make GstAVSynth re-calculate
+   * some needed frames (not to mention the time reqired to seek back), while
+   * using more memory than is physically available will only make OS swap
+   * more, which is still faster than frame re-calculation and seeking.
+   */
   while (newsize > p->bufs->len)
     g_ptr_array_set_size (p->bufs, p->bufs->len * 2);
   p->used_size = newsize;
@@ -193,7 +202,6 @@ gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *caps, AVS_
     goto cleanup;
   }
 
-  /* FIXME: What about true 24-bit BGR? */
   switch (vf)
   {
     case GST_VIDEO_FORMAT_I420:
@@ -203,7 +211,11 @@ gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *caps, AVS_
       vi->pixel_type = AVS_CS_YUY2;
       break;
     case GST_VIDEO_FORMAT_BGRx:
+    case GST_VIDEO_FORMAT_BGRA:
       vi->pixel_type = AVS_CS_BGR32;
+      break;
+    case GST_VIDEO_FORMAT_BGR:
+      vi->pixel_type = AVS_CS_BGR24;
       break;
     case GST_VIDEO_FORMAT_YV12:
       vi->pixel_type = AVS_CS_YV12;
@@ -219,7 +231,10 @@ gst_avsynth_buf_pad_caps_to_vi (GstBuffer *buf, GstPad *pad, GstCaps *caps, AVS_
       if (GST_BUFFER_FLAG_IS_SET (buf, GST_VIDEO_BUFFER_TFF))
         vi->image_type |= AVS_IT_TFF;
       else
-        /* FIXME: Not sure about that. Absence of TFF doesn't always mean BFF*/
+        /* Apparently, GStreamer doesn't know what "unknown field order" is.
+         * If you get wrong field order - file a bugreport against the source
+         * element (or maybe a decoder?). Field order should be known.
+         */
         vi->image_type |= AVS_IT_BFF;
     }
   }
@@ -433,8 +448,10 @@ _avs_vcf_add_buffer (AVS_VideoCacheFilter *p, GstPad *pad, GstBuffer *inbuf, AVS
 
   /* We don't really know the number of frame the other thread is waiting for
    * (or even if it waits at all), so we'll send a signal each time we add
-   * a buffer
-   * FIXME: Maybe we SHOULD know that? Just how taxing g_cond_signal() is?
+   * a buffer.
+   * People told me that calling g_cond_signal once for each frame (60 times
+   * a second, unless you're transcoding a video) doesn't make a difference.
+   * And transcoding itself is MUCH slower.
    */
   GST_DEBUG ("Video cache %p: signaling newframe", (gpointer) p);
   g_cond_signal (p->vcache_cond);

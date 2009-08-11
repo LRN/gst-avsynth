@@ -61,7 +61,9 @@ struct AVSynthSink
   /* Segment we've got from upstream on this pad, different for each pad */
   GstSegment segment;
 
-  /* Segment we've made by converting segment to default format */
+  /* Segment we've made by converting segment to default format (i think
+   * it is never used, but it's useful to have around, just in case...)
+   */
   GstSegment defsegment;
 
   /* TRUE if we've got EOS on this pad (set to FALSE on newsegment) */
@@ -100,7 +102,7 @@ struct AVSynthSink
 
   gint64 maxframeshift;
 
-  /* Offset of a last frame we've got. Used to interpolate offsets */
+  /* Offset of the last frame we've got. Used to interpolate offsets */
   gint64 last_offset;
 
   /* Timestamp of the first frame we've got. Sometimes it's not 0 */
@@ -163,7 +165,7 @@ struct _GstAVSynthVideoFilter
    * use this event to perform a seek.
    * GstAVSynth will not seek while GetFrame() is in the process.
    * When a new seek event is received before the driving thread has a chance
-   * to seek with currently stored event, it will be replaced.
+   * to seek with currently stored event, the event will be replaced.
    */
   GstEvent *seek_event;
 

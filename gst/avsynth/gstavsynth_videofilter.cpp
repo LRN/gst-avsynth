@@ -302,7 +302,9 @@ gst_avsynth_video_filter_class_init (GstAVSynthVideoFilterClass * klass)
     {
       AVSynthVideoFilterParam *paramstr = NULL;
       GParamSpec *paramspec = NULL;
-      /* FIXME: make all params construct-time-only? Because they are...right? */
+      /* Params are not construct-time-only. But changing them will not
+       * affect the underlying plugin, unless the video caps has changed
+       */
       GParamFlags paramflags = (GParamFlags) (G_PARAM_READABLE |
         G_PARAM_WRITABLE | G_PARAM_STATIC_NICK |
         G_PARAM_STATIC_BLURB);
@@ -602,7 +604,9 @@ gst_avsynth_video_filter_prepare_seek_segment (GstAVSynthVideoFilter * avsynth_v
   }
 
   if (cur_type != GST_SEEK_TYPE_NONE) {
-    /* FIXME: Handle seek_cur & seek_end by converting the input segment vals */
+    /* FIXME: Handle seek_cur & seek_end by converting the input segment vals
+     * This comment came from GstBaseSrc, i have NO idea what does it mean.
+     */
     res =
         gst_pad_query_convert (avsynth_video_filter->srcpad, seek_format, cur, &dest_format,
         &cur);
@@ -610,7 +614,9 @@ gst_avsynth_video_filter_prepare_seek_segment (GstAVSynthVideoFilter * avsynth_v
   }
 
   if (res && stop_type != GST_SEEK_TYPE_NONE) {
-    /* FIXME: Handle seek_cur & seek_end by converting the input segment vals */
+    /* FIXME: Handle seek_cur & seek_end by converting the input segment vals
+     * This comment came from GstBaseSrc, i have NO idea what does it mean.
+     */
     res =
         gst_pad_query_convert (avsynth_video_filter->srcpad, seek_format, stop, &dest_format,
         &stop);
@@ -678,7 +684,10 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
     flush = flags & GST_SEEK_FLAG_FLUSH;
     seqnum = gst_event_get_seqnum (event);
   } else {
-    /* FIXME: Unlikey to happen? */
+    /* This doesn't happen often. In fact, this never really happens,
+     * because we have a special way to seek without an event that does not
+     * involve calling this function.
+     */
     flush = FALSE;
     /* get next seqnum */
     seqnum = gst_util_seqnum_next ();
@@ -698,32 +707,16 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
   }
 
   /* unblock streaming thread. */
-  /* FIXME: replace with something suitable
-  gst_base_src_set_flushing (src, TRUE, FALSE, unlock, &playing); */
 
   /* grab streaming lock, this should eventually be possible, either
    * because the task is paused, our streaming thread stopped 
    * or because our peer is flushing. */
   GST_PAD_STREAM_LOCK (avsynth_video_filter->srcpad);
-/*
-  if (G_UNLIKELY (avsynth_video_filter->priv->seqnum == seqnum)) {
-    *//* we have seen this event before, issue a warning for now *//*
-    GST_WARNING_OBJECT (src, "duplicate event found %" G_GUINT32_FORMAT,
-        seqnum);
-  } else {
-    src->priv->seqnum = seqnum;
-    GST_DEBUG_OBJECT (src, "seek with seqnum %" G_GUINT32_FORMAT, seqnum);
-  }
-*/
 
-  /* FIXME: replace with something suitable
-  gst_base_src_set_flushing (src, FALSE, playing, unlock, NULL); */
-  
   /* If we configured the seeksegment above, don't overwrite it now. Otherwise
    * copy the current segment info into the temp segment that we can actually
    * attempt the seek with. We only update the real segment if the seek suceeds. */
   if (!seekseg_configured) {
-//    g_mutex_lock (avsynth_video_filter->stop_mutex);
     memcpy (&seeksegment, &avsynth_video_filter->segment, sizeof (GstSegment));
 
     /* now configure the final seek segment */
@@ -744,7 +737,6 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
             cur_type, cur, stop_type, stop, &update);
       }
     }
-//    g_mutex_unlock (avsynth_video_filter->stop_mutex);
     /* Else, no seek event passed, so we're just (re)starting the 
        current segment. */
   }
@@ -773,18 +765,8 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
     /* send flush stop, peer will accept data and events again. We
      * are not yet providing data as we still have the STREAM_LOCK. */
     gst_pad_push_event (avsynth_video_filter->srcpad, tevent);
-  } else if (res /*&& avsynth_video_filter->data.ABI.running*/) {
+  } else if (res) {
 
-    /* queue the segment for sending in the stream thread */
-/*
-    if (src->priv->close_segment)
-      gst_event_unref (src->priv->close_segment);
-    src->priv->close_segment =
-        gst_event_new_new_segment_full (TRUE,
-        src->segment.rate, src->segment.applied_rate, src->segment.format,
-        src->segment.start, src->segment.last_stop, src->segment.time);
-    gst_event_set_seqnum (src->priv->close_segment, seqnum);
-*/  
   }
 
   /* The subclass must have converted the segment to the processing format 
@@ -798,7 +780,6 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
   /* if successfull seek, we update our real segment and push
    * out the new segment. */
   if (res) {
-//    g_mutex_lock (avsynth_video_filter->stop_mutex);
     memcpy (&avsynth_video_filter->seeksegment, &seeksegment, sizeof (GstSegment));
 
     if (avsynth_video_filter->seeksegment.flags & GST_SEEK_FLAG_SEGMENT) {
@@ -811,53 +792,8 @@ avsynth_video_filter_perform_seek (GstAVSynthVideoFilter * avsynth_video_filter,
       gst_element_post_message (GST_ELEMENT (avsynth_video_filter), message);
     }
 
-    /* for deriving a stop position for the playback segment from the seek
-     * segment, we must take the duration when the stop is not set */
-/*
-    if ((stop = avsynth_video_filter->segment.stop) == GST_CLOCK_TIME_NONE)
-      stop = avsynth_video_filter->segment.duration;
-
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Sending newsegment from %" G_GINT64_FORMAT
-        " to %" G_GINT64_FORMAT, avsynth_video_filter->segment.start, stop);
-*/
-    /* now replace the old segment so that we send it in the stream thread the
-     * next time it is scheduled. */
-    /*
-    if (src->priv->start_segment)
-      gst_event_unref (src->priv->start_segment);
-    if (src->segment.rate >= 0.0) {
-      *//* forward, we send data from last_stop to stop *//*
-      src->priv->start_segment =
-          gst_event_new_new_segment_full (FALSE,
-          src->segment.rate, src->segment.applied_rate, src->segment.format,
-          src->segment.last_stop, stop, src->segment.time);
-    } else {
-      *//* reverse, we send data from last_stop to start *//*
-      src->priv->start_segment =
-          gst_event_new_new_segment_full (FALSE,
-          src->segment.rate, src->segment.applied_rate, src->segment.format,
-          src->segment.start, src->segment.last_stop, src->segment.time);
-    }
-    gst_event_set_seqnum (src->priv->start_segment, seqnum);
-    */
     avsynth_video_filter->newsegment = TRUE;
-//    g_mutex_unlock (avsynth_video_filter->stop_mutex);
   }
-
-  /* and restart the task in case it got paused explicitely or by
-   * the FLUSH_START event we pushed out. */
-/*
-  g_mutex_lock (avsynth_video_filter->stop_mutex);
-  avsynth_video_filter->pause = FALSE;
-  g_cond_signal (avsynth_video_filter->pause_cond);
-  g_mutex_unlock (avsynth_video_filter->stop_mutex);
-*/
-/*  if (G_UNLIKELY ((gst_task_get_state (avsynth_video_filter->framegetter) == GST_TASK_STOPPED) && avsynth_video_filter->impl))
-  {
-    GST_DEBUG_OBJECT (avsynth_video_filter, "Starting framegetter");
-    gst_task_start (avsynth_video_filter->framegetter);
-  }
-*/
 
   /* and release the lock again so we can continue streaming */
   GST_PAD_STREAM_UNLOCK (avsynth_video_filter->srcpad);
@@ -901,7 +837,6 @@ gst_avsynth_video_filter_framegetter (void *data)
   gint64 clip_start, clip_end, framenum;
   GstEvent *seekevent;
 
-  /* FIXME: Uh...shouldn't i use typecast macro here? */
   avsynth_video_filter = (GstAVSynthVideoFilter *) data;
   gst_object_ref (avsynth_video_filter);
 
@@ -1349,10 +1284,50 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
 void
 gst_avsynth_video_filter_finalize (GObject * object)
 {
+  GstAVSynthVideoFilterClass *oclass;
   GstAVSynthVideoFilter *avsynth_video_filter = (GstAVSynthVideoFilter *) object;
-
+  oclass = (GstAVSynthVideoFilterClass *) (G_OBJECT_GET_CLASS (avsynth_video_filter));
   g_module_close (avsynth_video_filter->plugin);
-  /* FIXME: free the stuff */
+
+  for (guint i = 0; i < oclass->properties->len; i++)
+  {
+    AVSynthSink *sink = NULL;
+
+    AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam*) g_ptr_array_index (oclass->properties, i);
+    if (param->param_type != 'c')
+      continue;
+
+    sink = (AVSynthSink *) g_ptr_array_index (avsynth_video_filter->sinks, i);
+
+    g_mutex_free (sink->sinkmutex);
+    g_free (sink);
+  }
+
+  g_ptr_array_free (avsynth_video_filter->sinks, TRUE);
+
+  gst_object_unref (avsynth_video_filter->framegetter);
+
+  g_free (avsynth_video_filter->framegetter_mutex);
+  g_static_rec_mutex_free (avsynth_video_filter->framegetter_mutex);
+
+  g_mutex_free (avsynth_video_filter->stop_mutex);
+  g_cond_free (avsynth_video_filter->pause_cond);
+
+  g_mutex_free (avsynth_video_filter->impl_mutex);
+
+  for (guint i = 0; i < oclass->properties->len; i++)
+  {
+    if (avsynth_video_filter->args[i])
+      delete avsynth_video_filter->args[i];
+  }
+  delete [] avsynth_video_filter->args;
+  g_free (avsynth_video_filter->args_c);
+
+  if (avsynth_video_filter->seek_event)
+  {
+    gst_event_unref (avsynth_video_filter->seek_event);
+    avsynth_video_filter->seek_event = NULL;
+  }
 
   g_string_chunk_free (avsynth_video_filter->string_dump);
 
@@ -1889,7 +1864,7 @@ gst_avsynth_video_filter_setcaps (GstPad * pad, GstCaps * caps)
   if ((avsynth_video_filter->impl_cpp || avsynth_video_filter->impl_c))
   {
     /* PClip is a weird one, but i think that NULL assignment should
-     * make it call the destructor. FIXME: make sure it does.
+     * make it call the destructor. TODO: make sure it does.
      */
     if (avsynth_video_filter->impl_cpp)
       avsynth_video_filter->impl_cpp = NULL;
@@ -1951,7 +1926,7 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
       g_mutex_unlock (sink->sinkmutex);
       GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink);
 
-      ret = TRUE;//gst_pad_push_event (avsynth_video_filter->srcpad, event);
+      ret = TRUE;
     }
     case GST_EVENT_FLUSH_STOP:
     {
@@ -1961,14 +1936,16 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
         sink->cache_cpp->Clear();
       else if (sink->cache_c)
         _avs_vcf_clear (sink->cache_c);
-      /* FIXME: init segment */
+      /* TODO: init segment? */
       sink->eos = FALSE;
       sink->starving = FALSE;
       sink->flush = FALSE;
+      sink->last_offset = -1;
+      sink->first_ts = GST_CLOCK_TIME_NONE;
       g_mutex_unlock (sink->sinkmutex);
       GST_DEBUG_OBJECT (avsynth_video_filter, "Video cache %p: Unlocked sinkmutex", (gpointer) sink);
       
-      ret = TRUE;//gst_pad_push_event (avsynth_video_filter->srcpad, event);
+      ret = TRUE;
       break;
     }
     case GST_EVENT_NEWSEGMENT:
@@ -2012,7 +1989,7 @@ gst_avsynth_video_filter_sink_event (GstPad * pad, GstEvent * event)
       break;
     }
     default:
-      ret = FALSE; //ret = gst_pad_push_event (avsynth_video_filter->srcpad, event);
+      ret = FALSE;
       break;
   }
 
@@ -2036,7 +2013,7 @@ void gst_avsynth_video_filter_init_plugin(GstAVSynthVideoFilter *avsynth_video_f
     arguments = new AVSValue[oclass->properties->len];
 
   /* args are initialized by _set_property() */
-  /* FIXME: simplify the readiness check */
+  /* TODO: simplify the readiness check */
   for (guint i = 0; i < oclass->properties->len && ready; i++)
   {
     AVSynthVideoFilterParam *param = (AVSynthVideoFilterParam *) g_ptr_array_index (oclass->properties, i);
@@ -2058,10 +2035,12 @@ void gst_avsynth_video_filter_init_plugin(GstAVSynthVideoFilter *avsynth_video_f
       g_mutex_lock (sink->sinkmutex);
       padcaps = gst_pad_get_negotiated_caps (sink->sinkpad);
 
-     /* FIXME: If the argument is mandatory, the filter will not check whether it is NULL or not,
+     /* TODO: If the argument is mandatory, the filter will not check whether it is NULL or not,
       * it will just call its AsClip().
       * I am yet to find a filter that accepts _optional_ second clip argument, so i don't know
       * anything about optional clip arguments. Until i figure it out, it's an error.
+      * I think BlankClip is supposed to be used when in place of an argument you don't have,
+      * but that's up to the user.
       */
       if (!sink->cache_cpp && !sink->cache_c)
       {
@@ -2081,7 +2060,6 @@ void gst_avsynth_video_filter_init_plugin(GstAVSynthVideoFilter *avsynth_video_f
           if (oclass->c)
           {
             _avs_val_set_to_clip(&(AVS_ARRAY_ELT (arguments_c, i)), (AVS_Clip *) sink->cache_c);
-//            _avs_val_set_to_clip(&(AVS_ARRAY_ELT (arguments_c, i)), sink->cache_c);
           }
           else
             arguments[i] = AVSValue ((IClip *) sink->cache_cpp);

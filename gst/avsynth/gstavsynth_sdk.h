@@ -297,6 +297,7 @@ enum
   AVS_CPU_3DNOW_EXT    = 0x80,   /* Athlon  */
   AVS_CPU_X86_64       = 0xA0,   /* Hammer (note: equiv. to 3DNow + SSE2,  */
                                  /* which only Hammer will have anyway) */
+  AVS_CPU_SSE3        = 0x100,  /* PIV+, Hammer */
 };
 
 enum {

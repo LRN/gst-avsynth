@@ -144,6 +144,12 @@ if test "x${HAVE_ORC}" = xyes ; then
 fi
 AM_CONDITIONAL(HAVE_ORC, test "x$HAVE_ORC" = "xyes")
 
+dnl liboil is required
+PKG_CHECK_MODULES(LIBOIL, liboil-0.3 >= 0.3.8, HAVE_LIBOIL=yes, HAVE_LIBOIL=no)
+if test "x$HAVE_LIBOIL" != "xyes"; then
+  AC_ERROR([liboil-0.3.8 or later is required])
+fi
+
 dnl checks for gstreamer
 dnl uninstalled is selected preferentially -- see pkg-config(1)
 AG_GST_CHECK_GST($GST_MAJORMINOR, [$GST_REQ], yes)
@@ -280,8 +286,6 @@ gst/Makefile
 gst/avsynth/Makefile
 filters/Makefile
 filters/testfilter/Makefile
-filters/decomb/Makefile
-filters/yadif/Makefile
 common/Makefile
 common/m4/Makefile
 tests/Makefile

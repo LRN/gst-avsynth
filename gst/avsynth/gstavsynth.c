@@ -43,6 +43,8 @@
 #include <orc/orcprogram.h>
 #endif
 
+#include <liboil/liboil.h>
+
 #include "gstavsynth.h"
 
 GST_DEBUG_CATEGORY (gst_avsynth_debug);
@@ -110,6 +112,8 @@ avsynth_init (GstPlugin * avsynth)
 #if HAVE_ORC
   orc_init ();
 #endif
+
+  oil_init();
 
   return TRUE;
 }

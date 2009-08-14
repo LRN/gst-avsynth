@@ -35,11 +35,14 @@
 #include "gstavsynth_videocache.h"
 #include "gstavsynth_videofilter.h"
 #include "gstavsynth_scriptenvironment.h"
-#if HAVE_ORC
 G_BEGIN_DECLS
+#if HAVE_ORC
 #include <orc/orcprogram.h>
-G_END_DECLS
 #endif
+#include <liboil/liboil.h>
+#include <liboil/liboilcpu.h>
+#include <liboil/liboilfunction.h>
+G_END_DECLS
 
 gchar *plugindir_var = NULL;
 
@@ -733,13 +736,63 @@ _avs_se_add_function(AVS_ScriptEnvironment * p, const char * name, const char * 
 
   return 0;
 }
-
+                                                                                                                                                                 
 glong AVSC_CC
 _avs_se_get_cpu_flags(AVS_ScriptEnvironment * p)
 {
+  OilImplFlag oilflags;
+  glong avsflags = 0;
   p->error = NULL;
-  /* Not implemented. Either use ORC/LIBOIL (even if only for CPU detection), or use plain C */
-  return 0;
+  /* This is the most stupid thing i ever did. Using liboil merely to get CPU
+   * capabilities.
+   */
+  oilflags = (OilImplFlag) oil_cpu_get_flags ();
+
+  /* FIXME: is this correct? Some CPUs may not have FPU... */
+  avsflags = CPUF_FPU;
+
+  if (oilflags & OIL_IMPL_FLAG_MMX)
+  {
+    GST_DEBUG ("Is MMX-capable");
+    avsflags |= CPUF_MMX;
+  }
+  if (oilflags & OIL_IMPL_FLAG_MMXEXT)
+  {
+    GST_DEBUG ("Is MMXEXT-capable");
+    avsflags |= CPUF_INTEGER_SSE;
+  }
+  if (oilflags & OIL_IMPL_FLAG_SSE)
+  {
+    GST_DEBUG ("Is SSE-capable");
+    avsflags |= CPUF_SSE;
+  }
+  if (oilflags & OIL_IMPL_FLAG_SSE2)
+  {
+    GST_DEBUG ("Is SSE2-capable");
+    avsflags |= CPUF_SSE2;
+  }
+  if (oilflags & OIL_IMPL_FLAG_3DNOW)
+  {
+    GST_DEBUG ("Is 3DNOW-capable");
+    avsflags |= CPUF_3DNOW;
+  }
+  if (oilflags & OIL_IMPL_FLAG_3DNOWEXT)
+  {
+    GST_DEBUG ("Is 3DNOWEXT-capable");
+    avsflags |= CPUF_3DNOW_EXT;
+  }
+  if (oilflags & OIL_IMPL_FLAG_SSE2 & OIL_IMPL_FLAG_3DNOW)
+  {
+    GST_DEBUG ("Is SSE2&3DNOW-capable");
+    avsflags |= CPUF_X86_64;
+  }
+  if (oilflags & OIL_IMPL_FLAG_SSE3)
+  {
+    GST_DEBUG ("Is SSE3-capable");
+    avsflags |= CPUF_SSE3;
+  }
+
+  return avsflags;
 }
 
 

@@ -23,9 +23,9 @@ libgstavsynth_la_SOURCES = gstavsynth.c gstavsynth_loader.cpp gstavsynth_videofi
 
 # flags used to compile this plugin
 # add other _CFLAGS and _LIBS as needed
-libgstavsynth_la_CFLAGS = $(GST_PLUGINS_BASE_CFLAGS) $(GST_CFLAGS) $(AVSYNTH_CFLAGS) $(ADD_ORC_CFLAGS)
-libgstavsynth_la_CXXFLAGS = $(GST_PLUGINS_BASE_CFLAGS) $(GST_CXXFLAGS) $(AVSYNTH_CFLAGS) $(ADD_ORC_CFLAGS)
-libgstavsynth_la_LIBADD = $(GST_PLUGINS_BASE_LIBS) $(GST_BASE_LIBS) $(GST_LIBS) $(AVSYNTH_LIBS) -lgstvideo-$(GST_MAJORMINOR) $(ADD_ORC_LIBS)
+libgstavsynth_la_CFLAGS = $(GST_PLUGINS_BASE_CFLAGS) $(GST_CFLAGS) $(AVSYNTH_CFLAGS) $(ADD_ORC_CFLAGS)  $(LIBOIL_CFLAGS)
+libgstavsynth_la_CXXFLAGS = $(GST_PLUGINS_BASE_CFLAGS) $(GST_CXXFLAGS) $(AVSYNTH_CFLAGS) $(ADD_ORC_CFLAGS) $(LIBOIL_CFLAGS)
+libgstavsynth_la_LIBADD = $(GST_PLUGINS_BASE_LIBS) $(GST_BASE_LIBS) $(GST_LIBS) $(AVSYNTH_LIBS) -lgstvideo-$(GST_MAJORMINOR) $(ADD_ORC_LIBS)  $(LIBOIL_LIBS)
 libgstavsynth_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
 libgstavsynth_la_LIBTOOLFLAGS = --tag=disable-static
 libgstavsynthincludedir = $(includedir)/gstreamer-@GST_MAJORMINOR@/gst/avsynth

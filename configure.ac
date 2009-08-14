@@ -284,6 +284,9 @@ common/shave-libtool
 gst-avsynth.spec
 gst/Makefile
 gst/avsynth/Makefile
+pkgconfig/Makefile
+pkgconfig/gstreamer-avsynth.pc
+pkgconfig/gstreamer-avsynth-uninstalled.pc
 filters/Makefile
 filters/testfilter/Makefile
 common/Makefile

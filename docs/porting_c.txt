@@ -1,0 +1,475 @@
+Porting AviSynth C plugins to GstAVSynth.
+
+Do not #include <windows.h>. There is no windows.h in most operating systems.
+
+#include <gst/avsynth/gstavsynth_sdk.h> instead of #include "avisynth.h".
+
+It is NOT recommended to keep a copy of gstavsynth_sdk.h in your source tree. Use pkgconfig to get proper -I path (see yadif port for examples).
+
+glib might define some macros you'd want to use (such as "MIN" and "MAX") - use them
+
+glib comes with cross-platform type system. Do use gint8, gint16, gint32, gint64 etc (at least for values that are going back to GstAVSynth). Most of the types defined in windows.h (such as BYTE), are re-defined by GstAVSynth sdk header as appropriate glib types.
+
+GstAVSynth C API comes with simple object system that loosely mimics its C++ counterpart. It works by subclassing AVS_Clip base class. It does have AVS_GenericVideoFilter class, derived from AVS_Clip, which does roughly the same thing GenericVideoFilter does in C++ API. You should derive your classes from AVS_GenericVideoFilter.
+GstAVSynth C API does not (yet?) come with FillBorder and AlignPlanar classes. However, you won't need them: GstAVSynth cannot chain plugins (filters) within one ScriptEnvironment context, and will internally take care of alignment: all incoming buffers are aligned to AVS_DEFAULT_ALIGN (which is 16) and all outgoing buffers are aligned to GStreamer native alignment. Underlying filters will always receive buffers aligned to AVS_DEFAULT_ALIGN.
+Write your subclass along these lines (this code is mostly a modified yadif source code):
+
+/* There is no requirement to keep "AVS_" notation, but it is useful to
+ * indicate that this structure is part of the AVS_ class tree
+ */
+typedef struct _AVS_MyFilterName AVS_MyFilterName;
+
+struct _AVS_MyFilterName
+{
+/* This is the parent class you're deriving from */
+  AVS_GenericVideoFilter parent;
+/* This is a pointer to a class derived from yours. Because it is derived from
+ * yours, and yours is derived from AVS_Clip, this derived class is guaranteed
+ * to support all methods and properties of AVS_Clip. That is - "parent",
+ * "child" and "destroy". This field will be set by derived class itself, while
+ * you should initialize it to NULL.
+ */
+  AVS_Clip *child;
+/* This is your class destructor. It is called when your class object reference
+ * count reaches zero. You should never call it directly.
+ */
+  AVS_DestroyFunc destroy;
+
+/* These are your object properties. They will be initialized in the
+ * constructor.
+ */
+  int mode;
+  int order;
+  int planar_hack; // bool
+  int cpu; // optimization
+  int yheight;
+  int ypitch;
+  int uvpitch;
+  int ywidth;
+  int uvwidth;
+  unsigned char *ysrc;
+  unsigned char *usrc;
+  unsigned char *vsrc;
+  unsigned char *yprev;
+  unsigned char *uprev;
+  unsigned char *vprev;
+  unsigned char *ynext;
+  unsigned char *unext;
+  unsigned char *vnext;
+  unsigned char *ydest;
+  unsigned char *udest;
+  unsigned char *vdest;
+
+/* These two are object properties too, just like the ones above,
+ * however nearly every plugin will want to have these. Well, ScriptEnvironment
+ * at the least.
+ */
+  AVS_VideoInfo vi;
+  AVS_ScriptEnvironment *env;
+};
+
+/* This is a forward declarator for your _get_frame() method. Note that
+ * GstAVSynth uses gint64 (signed 64-bit integer) for frame numbers.
+ */
+AVS_VideoFrame * AVSC_CC myfiltername_get_frame (AVS_Clip *_p, gint64 ndst);
+
+/* This is the destructor. It gets two arguments: a pointer to your class
+ * instance (casted as base class) and a boolean that tells the destructor
+ * whether it should actually free the object or not. Destructors are called
+ * in chain and only one of them will really free the memory occupied by
+ * the object. That will be the last destructor in chain, because it knows
+ * exactly the object's size. Also, see the constructor.
+ */
+void AVSC_CC
+myfiltername_destroy(AVS_Clip *p, gboolean freeself)
+{
+  /* Cast the pointer back to your class */
+  AVS_MyFilterName *f = (AVS_MyFilterName *)p;
+
+  /* Free everything you've allocated in the constructor,
+   * and unref all objects you could have.
+   * If you've used g_new* or g_malloc to allocate the memory,
+   * remember to use g_free to deallocate it.
+   * If you had a function like:
+   * myfiltername_free_filter (AVS_FilterInfo *), then
+   * this part of the destructor is identical to it.
+   */
+  if (AVS_IS_YUY2(&f->parent.vi) && f->planar_hack == 0)
+  {
+    free(f->ysrc);
+    free(f->usrc);
+    free(f->vsrc);
+    free(f->yprev);
+    free(f->uprev);
+    free(f->vprev);
+    free(f->ynext);
+    free(f->unext);
+    free(f->vnext);
+    free(f->ydest);
+    free(f->udest);
+    free(f->vdest);
+  }
+
+  /* After you've cleaned up after yourself, let your parent class
+   * do the cleaning too. This call is identical for all derived classes.
+   * FALSE tells the parent that it should not deallocate itself.
+   */
+  f->parent.destroy ((gpointer) &f->parent, FALSE);
+
+  /* After all parent classes (up to AVS_Clip base class) have cleaned up
+   * all dynamically allocated data, free the memory occupied by this object.
+   * If your class was subclassed by someone else, this destructor will be
+   * called with freeself=FALSE and the derived class' destructor will do the
+   * deallocating. Even though you have a pointer to your derived class and
+   * you can technically call its destructor, you should never do that.
+  if (freeself)
+    g_free (f);
+}
+
+/* This is the constructor. It insters your class into the class chain of a
+ * clip object and allocates all dynamic data.
+ * @p - an untyped pointer to the object.
+ * @e - Script Environment, which provides 90% of all C API calls.
+ * @args - arguments used to create your filter.
+ * returns: returns your class object. 
+ */
+AVS_MyFilterName *AVSC_CC
+myfiltername_construct(gpointer p, AVS_ScriptEnvironment *e, AVS_Value args)
+{
+  AVS_MyFilterName *f;
+  AVS_Clip *clip_self;
+  /* You may need some extra variables, declare them here */
+
+  /* You will have to call your parent constructor. Because your filter is
+   * derived from GenericVideoFilter, you will have to provide its constructor
+   * with all necessary arguments. In this case you'll take them from the
+   * arguments used to create your filter.
+   */
+  /* @e mostly consists of function pointers that point to the C API functions
+   * you will be calling. Always keep a pointer to AVS_ScriptEnvironment
+   * around (which is why it is one of the recommended properties of your
+   * object).
+   * All C API functions start with "avs" word. Second word is the type of
+   * object taken by the function as its first argument, the object this
+   * function is applied to. After that the action description follows.
+   * This convention is roughly the same as the one in GTK+.
+   * C API functions related to AVS_VideoInfo and AVS_Value are almost
+   * exclusively turned into macros. Such macros begin with "AVS", but there
+   * are no other conventions about their naming (they are uppercase, of
+   * course).
+   */
+  /* This, obviously, takes 0th element of "args" array (the macro returns
+   * AVS_Value, not a pointer to it!) and casts it into AVS_Clip pointer.
+   * There is no PClip (smart pointer from C++ API), so you'll have to
+   * remember to use special functions to handle AVS_Clip pointers, such as
+   * avs_val_take_clip, which will take a reference to the clip before
+   * giving you a pointer to it.
+   */
+  AVS_Clip *next = e->avs_val_take_clip(AVS_ARRAY_ELT(args, 0));
+
+  /* All constructors are called in chain. Because of that only one of them
+   * will really allocate the memory for the object, everyone else should
+   * just take a pointer to allocated memory and cast it appropriately.
+   */
+  if (!p)
+    f = g_new0 (AVS_MyFilterName, 1);
+  else
+    f = p;
+
+  /* This initializes the rest of the AVS_Clip part of this object (the
+   * @parent part is just allocated). You don't know how the class derived
+   * from yours will do allocation, so initialize child to NULL (at this point
+   * you know nothing about any derivatives).
+   */
+  f->destroy = myfiltername_destroy;
+  f->child = NULL;
+
+  /* Cast yourself as a base class */
+  clip_self = (AVS_Clip *)f;
+
+  /* Override any methods you need that are not already overriden by previous
+   * derived classes. At the very least you should override _get_frame method,
+   * else your filter will not actually do anything (GenericVideoFilter's
+   * _get_frame method will be used).
+   * Because it checks for !NULL here, PLEASE use malloc0, memset g_new0 or
+   * something like that to initialize the object with zeroes when you allocate
+   * it.
+   * You should also implement _get_video_info() method if you're going
+   * to change video stream parameters.
+   */
+  if (!clip_self->get_frame)
+    clip_self->get_frame = myfiltername_get_frame;
+  if (!clip_self->get_vide_info)
+    clip_self->get_video_info = myfiltername_get_video_info;
+
+  /* Call parent constructor. Note that constructor is called directly, because
+   * you have to give it its specific arguments (in this case - @next pointer).
+   * Its first argument is not NULL, so it will not allocate itself.
+   * It will do everything this constructor did up to this point (including
+   * calling its own parent constructor), including setting .child to NULL.
+   */
+  e->avs_gvf_construct (&f->parent, next);
+
+  /* Parent did not know that you have derived from it. Now it does. */
+  f->parent.child = clip_self;
+
+  /* _avs_gvf_construct ref'ed the @next clip, we can release it now.
+   * 0'th AVS_Value _still_ holds a ref to it, but that's not OUR problem.
+   */
+  e->avs_clip_release(next);
+
+  /* Store the environment pointer. Don't need to refcount it - its memory is
+   * managed by GstAVSynth internally.
+   */
+  f->env = e;
+  /* Copy AVS_VideoInfo from parent. AVS_VideoInfo is not a pointer. Just copy
+   * it. You will make some adjustments to your copy and return it back from
+   * your _get_video_info() method implementation.
+   */
+  f->vi = f->parent.vi;
+
+  /* Here you should analyze @args, adjust your @vi, etc */
+  if (AVS_IS_PLANAR(&f->vi) || AVS_IS_YUY2(&f->vi)) {
+    int opt;
+    //   get first argument
+    tmp = AVS_ARRAY_ELT(args, 1); // argument mode
+    if (AVS_DEFINED(tmp))
+      f->mode = AVS_AS_INT(tmp);
+    else
+      f->mode = 0 ;  // set default value = 0 if no argument
+
+    if (f->mode & 1)
+    {// bob mode, double number of frames and fps
+      f->vi.num_frames = f->vi.num_frames * 2;
+      if (f->vi.fps_denominator & 1)
+        f->vi.fps_numerator = f->vi.fps_numerator * 2;
+      else
+        f->vi.fps_denominator >>= 1;
+    }
+
+    tmp = AVS_ARRAY_ELT(args, 2); // argument order
+    if (AVS_DEFINED(tmp))
+      f->order = AVS_AS_INT(tmp);
+    else
+      f->order = -1 ;  // set default value = -1 if no argument
+
+    tmp = AVS_ARRAY_ELT(args, 3); // argument planar (SSETools ny Kassandro)
+    if (AVS_DEFINED(tmp))
+      f->planar_hack = AVS_AS_BOOL(tmp);
+    else
+      f->planar_hack = 0; // default false
+
+    tmp = AVS_ARRAY_ELT(args, 4); // argument opt
+    if (AVS_DEFINED(tmp))
+      opt = AVS_AS_INT(tmp);
+    else
+      opt = -1 ;  // set default value = -1 (auto) if no argument
+
+    f->cpu = e->avs_se_get_cpu_flags(e);
+
+    if (opt == 0)
+      f->cpu = 0;// pure C
+    else if (opt == 1 )
+      f->cpu &= AVS_CPU_INTEGER_SSE;
+    else if (opt == 2 )
+      f->cpu &= (AVS_CPU_INTEGER_SSE | AVS_CPU_SSE2);
+    else if (opt == 3 )
+      f->cpu &= (AVS_CPU_INTEGER_SSE | AVS_CPU_SSE2 | AVS_CPU_SSE3);
+  } else {
+    /* The video did not satisfy your requirements, which means that you can't
+     * process it. Destroy the clip object and return NULL.
+     */
+    /* unref f, calls destructor chain internally. ALWAYS use base (clip)
+     * destructor rather than your own destructor.
+     * Calling your own derived destructor (myfiltername_destroy) may appear to
+     * be working, but it will break things if someone subclasses your filter,
+     * and you will never know (although subclassing is unlikely unless
+     * you've exposed all the necessary bits in the header and passed the
+     * function pointers too).
+     */
+    e->avs_clip_release (clip_self);
+    /* f is now invalid */
+    f = NULL;
+  }
+
+  /* If everything went fine, allocate dynamic properties */
+  if (f && AVS_IS_YUY2(&f->vi) && f->planar_hack == 0)
+  {
+    // create intermediate planar planes
+    f->yheight = f->vi.height;
+    f->ywidth = f->vi.width;
+    f->uvwidth = f->ywidth/2;
+    f->ypitch = ((f->ywidth)+15)/16*16;
+    f->uvpitch = ((f->uvwidth)+15)/16*16;
+    f->ysrc = (guint8 *) malloc(f->yheight*f->ypitch);
+    f->usrc = (guint8 *) malloc(f->yheight*f->uvpitch);
+    f->vsrc = (guint8 *) malloc(f->yheight*f->uvpitch);
+    f->yprev = (guint8 *) malloc(f->yheight*f->ypitch);
+    f->uprev = (guint8 *) malloc(f->yheight*f->uvpitch);
+    f->vprev = (guint8 *) malloc(f->yheight*f->uvpitch);
+    f->ynext = (guint8 *) malloc(f->yheight*f->ypitch);
+    f->unext = (guint8 *) malloc(f->yheight*f->uvpitch);
+    f->vnext = (guint8 *) malloc(f->yheight*f->uvpitch);
+    f->ydest = (guint8 *) malloc(f->yheight*f->ypitch);
+    f->udest = (guint8 *) malloc(f->yheight*f->uvpitch);
+    f->vdest = (guint8 *) malloc(f->yheight*f->uvpitch);
+  }
+
+  /* Return your new object (or NULL if the creation failed) */
+  return f;
+}
+
+/* This is the callback used by GstAVSynth to create your filter object
+ * @env - C API handle
+ * @args - construction arguments
+ * @user_data - a pointer that you gave GstAVSynth with avs_se_add_function
+ * returns: A value of type "clip" or "error"
+ */
+AVS_Value AVSC_CC
+myfiltername_apply (AVS_ScriptEnvironment *env, AVS_Value args, gpointer user_data)
+{
+  /* This will be returned */
+  AVS_Value v;
+  /* Construct the object. First argument is NULL, so the constructor will also
+   * allocate the object.
+   */
+  AVS_MyFilterName *f = myfiltername_construct(NULL, env, args);
+  
+  /* You may want to pass some extra parameters that will tell you on return
+   * why the object creation failed exactly (the fact of failure is obvious
+   * when you get NULL from constructor, but the cause of failure is not).
+   * In this case the cause could be only one - wrong colorspace.
+   */
+  if (f == NULL)
+    /* This C API call creates new value of type "error" and inits it with
+     * given error message. The message string is stored internally by
+     * GstAVSynth.
+     */
+    v = env->avs_val_new_error ("Video must be YUV");
+  else
+  {
+    /* This C API call creates new value of type "clip" and inits it with
+     * given AVS_Clip object pointer. It also takes a reference to that
+     * pointer.
+     */
+    v = env->avs_val_new_clip ((AVS_Clip*) f);
+    /* avs_val_new_clip() refs the object once more. Unref it to keep the
+     * balance
+     */
+    env->avs_clip_release ((AVS_Clip*) f);
+  }
+  return v;
+}
+
+/* This is your actual get_frame method.
+ * @_p - pointer to your filter object (casted as AVS_Clip base class)
+ * @ndst - number of frame you must return
+ * returns: A pointer to AVS_VideoFrame object
+ */
+AVS_VideoFrame * AVSC_CC myfiltername_get_frame (AVS_Clip *_p, gint64 ndst) 
+{
+  /* Cast the pointer back to your class */
+  AVS_MyFilterName *p = (AVS_MyFilterName *)_p;
+
+  /* The code looks a bit nicer when you can do "e->func()" instead of
+   * "p->env->func()".
+   */
+  AVS_ScriptEnvironment *e = p->env;
+
+  /* This is what you're going to return eventually */
+  AVS_VideoFrame *dst = NULL;
+
+  /* Remember that your parent is AVS_GenericVideoFilter which does have a
+   * property that holds a reference to the next clip in filter chain
+   * (in reality it is actually an internal video frame cache, whcih
+   * implements AVS_Clip interface).
+   * This is also for niceness.
+   */
+  AVS_Clip *next = p->parent.next;
+
+  /* Temp. variable to hold a reference to a source frame */
+  AVS_VideoFrame *src;
+
+  /* Gets a source frame (frame #@ndst) from the previous filter in the
+   * filter chain.
+   */
+  src = next->get_frame(next, ndst);
+
+  /* Your code here */
+
+  /* Unref the source frame */
+  e->avs_vf_release (src);
+
+  return dst;
+}
+
+
+/* There should be _get_video_info() implementation somewhere here. It's
+ * pretty simple - just returns a copy of @vi.
+ */
+
+/* This is the function that GstAVSynth calls from your plugin module to
+ * hook up your plugin.
+ * @env - C API handle. You should NOT call any methods other than
+ *  avs_se_add_function. Environment is simply not ready for that.
+ *  If you absolutely need to call some C API methods here, you will have
+ *  to patch GstAVSynth's AVS_LoaderScriptEnvironment appropriately.
+ * returns: a string (doesn't really do anything)
+ */
+const char * AVSC_CC avisynth_c_plugin_init(AVS_ScriptEnvironment * env)
+{
+  /* Adds a filter from this plugin to GstAVSynth filter list.
+   * Note the 4th and 5th arguments. These are GStreamer pad capability
+   * strings. They will be used to restrict the types of data provided to
+   * your filter. That is, if the video is not compatible with these caps
+   * (for example, it is RGB instead of YUV), the application that constructs
+   * the video pipeline will get an error (but usually all applications will
+   * insert ffmpegcolorspace element before this filter, it will automatically
+   * convert everything it gets to one of the colorspaces supported by this
+   * filter (YV12 or YUY2). For details on caps string syntax see GStreamer
+   * documentation.
+   */
+  env->avs_se_add_function(env, "MyFilterName", "c[mode]i[order]i[planar]b[opt]i",
+  "video/x-raw-yuv, format=(fourcc)YV12; video/x-raw-yuv, format=(fourcc)YUY2",
+  "video/x-raw-yuv, format=(fourcc)YV12; video/x-raw-yuv, format=(fourcc)YUY2",
+  myfiltername_apply, NULL);
+  return "Absolutely useless string (haven't seen it used anywhere)";
+}
+
+Only AVS_Clip supports subclassing. AVS_VideoFrame doesn't. However it DOES support refcounting - always use avs_vf_release() C API call to unref it and always use avs_val_take_clip() and avs_vf_ref() to take a ref it. Never access AVS_VideoFrame's contents directly, always call avs_vf_* functions.
+You should never try to access AVS_VideoFrameBuffer. You don't have such functions and you should never access it via AVS_VideoFrame::vfb (because you should never use AVS_VideoFrame directly and there is no avs_vf_get_frame_buffer!).
+
+There are _p() variants for some C API calls. There will work on planar frames.
+
+All AVS_* macros that work with AVS_VideoInfo will take a pointer to AVS_VideoInfo.
+All AVS_* macros that work with AVS_Value will take actual AVS_Value, not a pointer. This does not always apply to AVS_ScriptEnvironment avs_val_*() methods (see their prototypes).
+
+avs_val_new_array() will not take AVS_Value, only a size of new array. It will allocate the memory for array internally.
+Always use avs_val_copy() to ref an AVS_Value that isn't yours before it goes away. It will copy simple types, and will copy array pointers, but will ref clips.
+Always use avs_val_release() to dispose of AVS_Value that you have created or copied, unless its an array. It will unref clips and deallocate arrays (there is NO refcounting for arrays, so only release an array when you know that no one will use it anymore!).
+Use avs_val_set_to_clip() to assign an AVS_Clip pointer to an AVS_Value. It will ref the clip, so if you're going to give that AVS_Value away, you should unref the clip, since AVS_Value holds it already, unless you need it too.
+
+Your filter (no matter what it does) should call avs_vf_set_timestamp() on the frame before returning it from _get_frame(). Timestamp of a frame describes a moment of time when this frame should be displayed (PTS, presentation timestamp). It is measured in nanoseconds passed since the stream started (however timestamp of the first frame may not be zero!). You can get timestamp of a frame via avs_vf_get_timestamp().
+If your filter does nothing to alter timeflow (change fps, change number of frames, change frame order etc), just copy timestamp from the source frame. You your
+If your filter DOES something with the timeflow, you'll have to figure out how to calculate timestamps for new frames. You still can just copy timestamps from the source frames. It will hold as long as timestamps are increasing monotonically (that is, every next timestamp is greater or equal than previous), although uneven timestamp steps might cause audio/video desynchronization and might screw video playback speed.
+GstAVSynth will NOT correct the timestamps your filter outputs.
+
+Don't use assembler. GStreamer works on many platforms, you can't possibly write assembler code for all of them. Consider using liborc or liboil. If you DO use assembler or one of these two libraries, always implement a C backup for every asm function.
+
+GstAVSynth does not support:
+Invoke
+Get*Var
+SetVar
+SetWorkingDir
+Pop*Context
+Push*Context
+
+GetVar is actually supported, but at the moment it knows only one variable - $PluginDir. It may be expanded in the future. Everything else is used in scripting, and GstAVSynth does NOT support scripting (if it did, it would have been AviSynth 3.0!).
+
+SetCacheHints does not work. GstAVSynth uses a caching system that is different from AviSynth and does not support (yet?) cache hinting. It will always give your filter all the frames it requests or will die due to lack of memory.
+
+If a filter requests more than one frame in its _get_frame() method, it should request the frame with lowest number first. If it doesn't it might decrease cache performance.
+A filter should not request old frames that were not requested in previous _get_frame() call. That is, if it requrested frames 0,1,2,3,4 to produce frame 4 and requested frames 1,2,3,4,5 to produce frame 5, it should not request frame 0 to produce frames 6 and higher. If it does, it will make GstAVSynth discard its cache and seek backwards, dramatically reducing performance. Thus, if a filter may require variable number of frames, always request the frame with the lowest number even if it is not going to be actually used. This cache behaviour may be change in the future.
+To cut it short: the ideal filter should request constant number of frames in each _get_frame() call, and it should not request frames that were left unused for at least one _get_frame() call.
+
+GStreamer does not know parity (field order) of an interlaced stream. It should know parity of a particular frame of an interlaced stream however (if it doesn't, it's a GStreamer bug or a pipeline bug). You are encouraged to use avs_vf_get_parity() to get parity of a frame you've obtained via _get_frame(). avs_se_get_parity() will work too, but it basically calls _get_frame() and avs_vf_get_parity() internally.

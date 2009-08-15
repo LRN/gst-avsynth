@@ -1,0 +1,53 @@
+Porting AviSynth C++ plugins to GstAVSynth.
+
+Do not #include <windows.h>. There is no windows.h in most operating systems.
+
+#include <gst/avsynth/gstavsynth_sdk_cpp.h> instead of #include "avisynth.h".
+
+It is NOT recommended to keep a copy of gstavsynth_sdk_cpp.h in your source tree. Use pkgconfig to get proper -I path (see decomb port for examples).
+
+glib might define some macros you'd want to use (such as "MIN" and "MAX") - use them
+
+glib comes with cross-platform type system. Do use gint8, gint16, gint32, gint64 etc (at least for values that are going back to GstAVSynth). Most of the types defined in windows.h (such as BYTE), are re-defined by GstAVSynth sdk header as appropriate glib types.
+
+GstAVSynth C++ API uses the same header AviSynth C++ API does, with all the same classes.
+FillBorder and AlignPlanar are available in the header as well (though you won't need them).
+
+Your filter (no matter what it does) should call VideoFrame::SetTimestamp() on the frame before returning it from GetFrame(). Timestamp of a frame describes a moment of time when this frame should be displayed (PTS, presentation timestamp). It is measured in nanoseconds passed since the stream started (however timestamp of the first frame may not be zero!). You can get timestamp of a frame via VideoFrame::GetTimestamp().
+If your filter does nothing to alter timeflow (change fps, change number of frames, change frame order etc), just copy timestamp from the source frame.
+If your filter DOES something with the timeflow, you'll have to figure out how to calculate timestamps for new frames. You still can just copy timestamps from the source frames. It will hold as long as timestamps are increasing monotonically (that is, every next timestamp is greater or equal than previous), although uneven timestamp steps might cause audio/video desynchronization and might screw video playback speed.
+GstAVSynth will NOT correct the timestamps your filter outputs.
+
+Don't use assembler. GStreamer works on many platforms, you can't possibly write assembler code for all of them. Consider using liborc or liboil. If you DO use assembler or one of these two libraries, always implement a C++ backup for every asm function.
+
+GstAVSynth does not support:
+Invoke
+Get*Var
+SetVar
+SetWorkingDir
+Pop*Context
+Push*Context
+
+GetVar is actually supported, but at the moment it knows only one variable - $PluginDir. It may be expanded in the future. Everything else is used in scripting, and GstAVSynth does NOT support scripting (if it did, it would have been AviSynth 3.0!).
+
+SetCacheHints, ManageCache, SetMemoryMax do not work. GstAVSynth uses a caching system that is different from AviSynth and does not support (yet?) cache hinting. It will always give your filter all the frames it requests or will die due to lack of memory.
+
+If a filter requests more than one frame in its GetFrame() method, it should request the frame with lowest number first. If it doesn't it might decrease cache performance.
+A filter should not request old frames that were not requested in previous GetFrame() call. That is, if it requrested frames 0,1,2,3,4 to produce frame 4 and requested frames 1,2,3,4,5 to produce frame 5, it should not request frame 0 to produce frames 6 and higher. If it does, it will make GstAVSynth discard its cache and seek backwards, dramatically reducing performance. Thus, if a filter may require variable number of frames, always request the frame with the lowest number even if it is not going to be actually used. This cache behaviour may be change in the future.
+To cut it short: the ideal filter should request constant number of frames in each GetFrame() call, and it should not request frames that were left unused for at least one GetFrame() call.
+
+GStreamer does not know parity (field order) of an interlaced stream. It should know parity of a particular frame of an interlaced stream however (if it doesn't, it's a GStreamer bug or a pipeline bug). You are encouraged to use VideoFrame::GetParity() to get parity of a frame you've obtained via GetFrame(). IScriptEnvironment::GetParity() will work too, but it basically calls GetFrame() and VideoFrame::GetParity() internally.
+
+Use __mingw_aligned_malloc()/__mingw_aligned_free() on Windows, or memalign()/free() (on *nix) instead of _aligned_malloc()/_aligned_free().
+
+All frames given by GstAVSynth will be aligned to FRAME_ALIGN (16). GstAVSynth will internally aligh every frame it is given back to GStreamer native alignment.
+
+There is no audio support in GstAVSynth.
+
+GstAVSynth uses gint64 for frame numbers. Change GetFrame accordingly.
+
+IScriptEnvironment::AddFunction() takes two additional arguments (4th and 5th) - GStreamer pad capability strings. They will be used to restrict the types of data provided to your filter. That is, if the video is not compatible with these caps (for example, it is RGB instead of YUV), the application that constructs the video pipeline will get an error (but usually all applications will insert ffmpegcolorspace element before this filter, it will automatically convert everything it gets to one of the colorspaces supported by this filter (YV12 or YUY2). For details on caps string syntax see GStreamer documentation.
+
+You should not call anything other than IScriptEnvironment::AddFunction() from within AvisynthPluginInit2(), because script environment does not support that. If you absolutely need to call something else, you will have to patch GstAVSynth.
+
+At the moment only one AtExit handler could be registered at any given moment. Do not call AtExit twice.

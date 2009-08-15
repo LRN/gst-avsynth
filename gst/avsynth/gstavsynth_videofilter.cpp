@@ -1266,6 +1266,18 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
     avsynth_video_filter->args_c[i].type = 'v';
   }
 
+  avsynth_video_filter->env_cpp = NULL;
+  avsynth_video_filter->shutdown_cpp = NULL;
+  avsynth_video_filter->shutdown_data_cpp = NULL;
+  avsynth_video_filter->apply_cpp = NULL;
+  avsynth_video_filter->user_data_cpp = NULL;
+
+  avsynth_video_filter->env_c = NULL;
+  avsynth_video_filter->shutdown_c = NULL;
+  avsynth_video_filter->shutdown_data_c = NULL;
+  avsynth_video_filter->apply_c = NULL;
+  avsynth_video_filter->user_data_c = NULL;
+
   avsynth_video_filter->uninitialized = TRUE;
 
   avsynth_video_filter->seeksegment.time = GST_CLOCK_TIME_NONE;
@@ -2440,8 +2452,24 @@ _avs_se_new (GstAVSynthVideoFilter *avsf)
 void
 _avs_se_free (AVS_ScriptEnvironment *e)
 {
+  GstAVSynthVideoFilter *avsvf = (GstAVSynthVideoFilter *)e->internal;
+
   if (e->internal)
-    g_object_unref (G_OBJECT((GstAVSynthVideoFilter *)e->internal));
+  {
+    if (avsvf->shutdown_c)
+    {
+      avsvf->shutdown_c(avsvf->user_data_c, avsvf->env_c);
+      avsvf->user_data_c = NULL;
+      avsvf->shutdown_c = NULL;
+    }
+    else if (avsvf->shutdown_cpp)
+    {
+      avsvf->shutdown_cpp(avsvf->user_data_cpp, avsvf->env_cpp);
+      avsvf->user_data_cpp = NULL;
+      avsvf->shutdown_cpp = NULL;
+    }
+    g_object_unref (G_OBJECT(avsvf));
+  }
   if (e->error)
     g_free (e->error);
   g_free (e);

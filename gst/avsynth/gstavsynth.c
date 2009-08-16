@@ -25,12 +25,44 @@
  * AVSynth is a wrapper that calls various AviSynth filters. As such, it does
  * nothing by itself.
  *
+ * When loaded, AVSynth will scan its plugin directory (lib/avsynth-0.10) for
+ * plugins. It will call plugin initialization function for each plugin, which
+ * will in turn invoke AddFunction callback to register one or more filtering
+ * functions. For each such function AVSynth will create an element class.
+ * Class name is created by concatenating the word "avsynth_" and the name
+ * of the function it represents (case sensitive). So, a FFT3DFilter function
+ * will be registered as avsynth_FFT3DFilter element, for example.
+ *
+ * AVSynth only works with video filters.
+ *
+ * AviSynth plugins must be built against AVSynth's sdk header and glib
+ * headers and be modified to perform some actions required by AVSynth
+ * (see AVSynth porting guide in docs/porting_c.txt and docs/porting_cpp.txt).
+ *
+ * Each filter element will have at least one sink that accepts video data.
+ * Some elements may have mode than one sink, but that is rare. Nevertheless,
+ * if there are two or more sinks, each one of them must be connected and be
+ * fed with video data, else the element will not work. If there are no data
+ * available, videotestsrc with appropriate settings should be used to create
+ * blank video data.
+ *
+ * AVSynth maps AviSynth filter arguments to element properties. Their names
+ * are taken from AviSynth filter parameter string. Unnamed arguments will be
+ * named automatically. Argument names are case-sensitive.
+ *
  * <refsect2>
  * <title>Launching sample AVSynth filter (overlays part of video stream#1 over video stream#0)</title>
  * |[
  * gst-launch-0.10 avsynth_SimpleSample name=filter SIZE=100 ! glimagesink videotestsrc ! filter.sink0 videotestsrc ! filter.sink1
  * ]|
+ *
+ * <title>Deinterlacing a DVD video with FieldDeinterlace filter (from Decomb plugin)</title>
+ * |[
+ * gst-launch-0.10 uridecodebin uri="file:///F:/VIDEO_TS/VTS_01_1.VOB" ! ffmpegcolorspace ! avsynth_FieldDeinterlace vthresh=40 blend=TRUE ! glimagesink
+ * ]|
  * </refsect2>
+ *
+ * Last reviewed on August 16 2009 (0.10.22)
  */
 
 #ifdef HAVE_CONFIG_H
@@ -49,6 +81,7 @@
 
 GST_DEBUG_CATEGORY (gst_avsynth_debug);
 
+/* This is used to find avsynth plugin directory */
 #ifdef G_OS_WIN32
 #include <windows.h>
 static HMODULE gst_dll_handle;
@@ -98,14 +131,16 @@ avsynth_init (GstPlugin * avsynth)
     g_free (lib_dir);
     g_free (dir);
   }
+#else
+#  warning Something similar should be done for other systems as well
 #endif
   
   gst_plugin_add_dependency_simple (avsynth, NULL, plugindirs, NULL,
       GST_PLUGIN_DEPENDENCY_FLAG_NONE);
 
-  GST_LOG("calling gst_avsynth_video_filter_register...");
+  GST_DEBUG("calling gst_avsynth_video_filter_register...");
   result = result && gst_avsynth_video_filter_register (avsynth, plugindirs);
-  GST_LOG("gst_avsynth_video_filter_register result is %d", result);
+  GST_DEBUG("gst_avsynth_video_filter_register result is %d", result);
 
   g_free (plugindirs);
 
@@ -126,7 +161,7 @@ GST_PLUGIN_DEFINE (
     "Wrapper for AviSynth filters",
     avsynth_init,
     VERSION,
-    "LGPL",
+    "GPL",
     "GStreamer",
     "http://gstreamer.net/"
 )

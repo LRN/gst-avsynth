@@ -201,21 +201,38 @@ typedef __int64 INT64;
 #endif
 
 
-/****
+/**
+ * AVS_SampleType:
+ * @AVS_SAMPLE_INT8: 8-bit integer samples
+ * @AVS_SAMPLE_INT8: 16-bit integer samples
+ * @AVS_SAMPLE_INT8: 24-bit integer samples
+ * @AVS_SAMPLE_INT8: 32-bit integer samples
+ * @AVS_SAMPLE_INT8: floating-point samples
  *
- * Constants
+ * Enum value describing the audio sample formats.
  */
-
-enum
+typedef enum
 {
   AVS_SAMPLE_INT8  = 1<<0,
   AVS_SAMPLE_INT16 = 1<<1, 
   AVS_SAMPLE_INT24 = 1<<2,
   AVS_SAMPLE_INT32 = 1<<3,
   AVS_SAMPLE_FLOAT = 1<<4
-};
+} AVS_SampleType;
 
-enum
+/**
+ * AVS_Plane:
+ * @AVS_PLANAR_Y: Y-plane in YUV colorspace
+ * @AVS_PLANAR_U: U-plane in YUV colorspace
+ * @AVS_PLANAR_V: V-plane in YUV colorspace
+ * @AVS_PLANAR_ALIGNED: Plane is aligned
+ * @AVS_PLANAR_Y_ALIGNED: Aligned Y-plane in YUV colorspace
+ * @AVS_PLANAR_U_ALIGNED: Aligned U-plane in YUV colorspace
+ * @AVS_PLANAR_V_ALIGNED: Aligned V-plane in YUV colorspace
+ *
+ * Enum value describing the plane.
+ */
+typedef enum
 {
   AVS_PLANAR_Y=1<<0,
   AVS_PLANAR_U=1<<1,
@@ -224,19 +241,38 @@ enum
   AVS_PLANAR_Y_ALIGNED=AVS_PLANAR_Y|AVS_PLANAR_ALIGNED,
   AVS_PLANAR_U_ALIGNED=AVS_PLANAR_U|AVS_PLANAR_ALIGNED,
   AVS_PLANAR_V_ALIGNED=AVS_PLANAR_V|AVS_PLANAR_ALIGNED
-};
+} AVS_Plane;
 
-  /* Colorspace properties.*/
-enum
+/**
+ * AVS_ColorspaceProperty:
+ * @AVS_CS_BGR: RBG colorspace (ordered as BGR)
+ * @AVS_CS_YUV: YUV colorspace
+ * @AVS_CS_INTERLEAVED: Colorspace is interleaved
+ * @AVS_CS_PLANAR: Colorspace is planar
+ *
+ * Enum value describing the generic colorspace properties.
+ */
+typedef enum
 {
   AVS_CS_BGR = 1<<28,  
   AVS_CS_YUV = 1<<29,
   AVS_CS_INTERLEAVED = 1<<30,
   AVS_CS_PLANAR = 1<<31
-};
+} AVS_ColorspaceProperty;
 
-  /* Specific colorformats*/
-enum
+/**
+ * AVS_Colorspace:
+ * @AVS_CS_UNKNOWN: Unknown colorspace
+ * @AVS_CS_BGR24: Interleaved RGB (ordered as BGR), 24 bps
+ * @AVS_CS_BGR32: Interleaved RGB (ordered as BGRA), 32 bps
+ * @AVS_CS_YUY2: Interleaved YUV with 2x1 subsampled UV (YUV 4:2:2)
+ * @AVS_CS_YV12: Planar YUV (ordered as YVU, VU planes are 2x2 subsampled)
+ * @AVS_CS_IYUV: Planar YUV (UV planes are 2x2 subsampled)
+ * @AVS_CS_I420: Planar YUV (UV planes are 2x2 subsampled, bottom line first)
+ *
+ * Enum value describing specific colorspaces.
+ */
+typedef enum
 {
   AVS_CS_UNKNOWN = 0,
   AVS_CS_BGR24 = 1<<0 | AVS_CS_BGR | AVS_CS_INTERLEAVED,
@@ -245,16 +281,29 @@ enum
   AVS_CS_YV12 = 1<<3 | AVS_CS_YUV | AVS_CS_PLANAR,  /* y-v-u, planar */
   AVS_CS_I420 = 1<<4 | AVS_CS_YUV | AVS_CS_PLANAR,  /* y-u-v, planar */
   AVS_CS_IYUV = 1<<4 | AVS_CS_YUV | AVS_CS_PLANAR  /* same as above */
-};
+} AVS_Colorspace;
 
-enum
+/**
+ * AVS_ParityType:
+ * @AVS_IT_BFF: Bottom field first
+ * @AVS_IT_TFF: Top field first
+ * @AVS_IT_FIELDBASED: Field-based frames
+ *
+ * Enum value describing frame parity flags.
+ */
+typedef enum
 {
   AVS_IT_BFF = 1<<0,
   AVS_IT_TFF = 1<<1,
   AVS_IT_FIELDBASED = 1<<2
-};
+} AVS_ParityType;
 
-enum
+/**
+ * AVS_FilterParams:
+ *
+ * This enum is not used
+ */
+typedef enum
 {
   AVS_FILTER_TYPE=1,
   AVS_FILTER_INPUT_COLORSPACE=2,
@@ -266,25 +315,52 @@ enum
   AVS_FILTER_ARGS_INFO=8,
   AVS_FILTER_ARGS_DESCRIPTION=10,
   AVS_FILTER_DESCRIPTION=11
-};
+} AVS_FilterParams;
 
-/*SUBTYPES*/
-enum
+/**
+ * AVS_FilterSubtypes:
+ *
+ * This enum is not used
+ */
+typedef enum
 {
   AVS_FILTER_TYPE_AUDIO=1,
   AVS_FILTER_TYPE_VIDEO=2,
   AVS_FILTER_OUTPUT_TYPE_SAME=3,
   AVS_FILTER_OUTPUT_TYPE_DIFFERENT=4
-};
+} AVS_FilterSubtypes;
 
-enum
+/**
+ * AVS_CacheHints:
+ * @AVS_CACHE_NOTHING: do not cache anything
+ * @AVS_CACHE_RANGE: cache frames in range
+ *
+ * Enum value describing cache hints.
+ */
+typedef enum
 {
   AVS_CACHE_NOTHING=0,
   AVS_CACHE_RANGE=1
-};
+} AVS_CacheHints;
 
-/* For GetCPUFlags.  These are backwards-compatible with those in VirtualDub.*/
-enum
+/**
+ * AVS_CPUFlags:
+ * @AVS_CPU_FORCE: N/A
+ * @AVS_CPU_FPU: 386/486DX
+ * @AVS_CPU_MMX: P55C, K6, PII
+ * @AVS_CPU_INTEGER_SSE: PIII, Athlon
+ * @AVS_CPU_SSE: PIII, Athlon XP/MP
+ * @AVS_CPU_SSE2: PIV, Hammer
+ * @AVS_CPU_3DNOW: K6-2
+ * @AVS_CPU_3DNOW_EXT: Athlon
+ * @AVS_CPU_X86_64: Hammer (note: equiv. to 3DNow + SSE2 which only Hammer will
+ * have anyway)
+ * @AVS_CPU_SSE3: PIV+, Hammer
+ *
+ * For GetCPUFlags.  These are backwards-compatible with those in VirtualDub.
+ * The comment for each value denotes the slowest CPU to support that extension
+ */
+typedef enum
 {                    
                                 /* slowest CPU to support extension */
   AVS_CPU_FORCE        = 0x01,   /* N/A */
@@ -298,14 +374,21 @@ enum
   AVS_CPU_X86_64       = 0xA0,   /* Hammer (note: equiv. to 3DNow + SSE2,  */
                                  /* which only Hammer will have anyway) */
   AVS_CPU_SSE3        = 0x100,  /* PIV+, Hammer */
-};
+} AVS_CPUFlags;
 
-enum {
+/**
+ * AVS_PlanarChroma:
+ * @AVS_PLANAR_CHROMA_ALIGNMENT_OFF: Planar chroma alignment is off
+ * @AVS_PLANAR_CHROMA_ALIGNMENT_ON: Planar chroma alignment is on
+ * @AVS_PLANAR_CHROMA_ALIGNMENT_TEST: Check planar chroma alignment
+ *
+ * Enum value describing planar chroma alignment.
+ */
+typedef enum {
   AVS_PLANAR_CHROMA_ALIGNMENT_OFF,
   AVS_PLANAR_CHROMA_ALIGNMENT_ON,
   AVS_PLANAR_CHROMA_ALIGNMENT_TEST
-};
-
+} AVS_PlanarChroma;
 
 typedef struct _AVS_FilterInfo AVS_FilterInfo;
 typedef struct _AVS_VideoInfo AVS_VideoInfo;
@@ -347,7 +430,6 @@ typedef AVSC_STRUCT_API(AVS_Clip *) (*__avs_clip_copy) (AVS_Clip *p);
  * AVS_ScriptEnvironment
  *
  */
-
 typedef AVSC_STRUCT_API(glong) (*__avs_se_get_cpu_flags) (AVS_ScriptEnvironment * p);
 typedef AVSC_STRUCT_API(gchar *) (*__avs_se_save_string) (AVS_ScriptEnvironment * p, const gchar* s, gssize length);
 typedef AVSC_STRUCT_API(gchar *) (*__avs_se_sprintf) (AVS_ScriptEnvironment * p, const gchar* fmt, ...);
@@ -370,15 +452,12 @@ typedef AVSC_STRUCT_API(gint) (*__avs_se_add_function)(AVS_ScriptEnvironment * p
 
 /********************************
  *
- * AVS_VideoFrame methods
+ * AVS_VideoFrame
  *
  *
  */
-
 typedef AVSC_STRUCT_API(gint) (*__avs_se_make_vf_writable) (AVS_ScriptEnvironment *p, AVS_VideoFrame **pvf);
 typedef AVSC_STRUCT_API(AVS_VideoFrame *) (*__avs_se_vf_new_a) (AVS_ScriptEnvironment *p, const AVS_VideoInfo *vi, gint align);
-/*typedef AVSC_STRUCT_API(AVS_VideoFrame *) (*__avs_vf_new) (AVS_ScritpEnvironment *p, gint row_size, gint height, gint align); */
-/*typedef AVSC_STRUCT_API(AVS_VideoFrame *) (*__avs_vf_new_p) (AVS_ScritpEnvironment *p, gint width, gint height, gint align, gboolean U_first); */
 typedef AVSC_STRUCT_API(int) (*__avs_vf_get_offset) (const AVS_VideoFrame *p);
 typedef AVSC_STRUCT_API(int) (*__avs_vf_get_offset_p) (const AVS_VideoFrame *p, gint plane);
 typedef AVSC_STRUCT_API(int) (*__avs_vf_get_pitch) (const AVS_VideoFrame * p);
@@ -406,8 +485,6 @@ typedef AVSC_STRUCT_API(AVS_VideoFrame *) (*__avs_vf_copy) (AVS_VideoFrame * p);
  * AVS_GenericVideoFilter
  *
  */
-
-/*typedef AVSC_STRUCT_API(void) (*__avs_gvf_destroy) (gpointer p, gboolean freeself);*/
 typedef AVSC_STRUCT_API(AVS_GenericVideoFilter *) (*__avs_gvf_construct) (AVS_GenericVideoFilter *p, AVS_Clip *next);
 typedef AVSC_STRUCT_API(AVS_VideoFrame *) (*__avs_gvf_get_frame) (AVS_Clip *p, gint64 n, AVS_ScriptEnvironment *env);
 typedef AVSC_STRUCT_API(void) (*__avs_gvf_get_audio) (AVS_Clip *p, gpointer buf, gint64 start, gint64 count, AVS_ScriptEnvironment *env);
@@ -420,7 +497,6 @@ typedef AVSC_STRUCT_API(void) (*__avs_gvf_set_cache_hints) (AVS_Clip *p, gint64 
  *
  * AVS_Value
  */
-
 typedef AVSC_STRUCT_API(AVS_Clip *) (*__avs_val_take_clip) (AVS_Value v);
 typedef AVSC_STRUCT_API(void) (*__avs_val_set_to_clip) (AVS_Value *v, AVS_Clip *c);
 typedef AVSC_STRUCT_API(void) (*__avs_val_copy) (AVS_Value * dest, AVS_Value src);
@@ -433,8 +509,6 @@ typedef AVSC_STRUCT_API(void) (*__avs_val_release) (AVS_Value v);
  * AVS_Value methods
  *
  */
-
-
 typedef AVSC_STRUCT_API(AVS_Value) (*__avs_val_new_bool) (gboolean v0);
 typedef AVSC_STRUCT_API(AVS_Value) (*__avs_val_new_int) (gint v0);
 typedef AVSC_STRUCT_API(AVS_Value) (*__avs_val_new_string) (const gchar * v0);
@@ -444,7 +518,6 @@ typedef AVSC_STRUCT_API(AVS_Value) (*__avs_val_new_clip) (AVS_Clip * v0);
 typedef AVSC_STRUCT_API(AVS_Value) (*__avs_val_new_array) (gint size);
 
 typedef AVSC_STRUCT_API(void) (*AVS_DestroyFunc)(AVS_Clip *p, gboolean freeself);
-
 typedef AVSC_STRUCT_API(AVS_VideoFrame *) (*AVS_GetFrameFunc)(AVS_Clip *p, gint64 n);
 typedef AVSC_STRUCT_API(gint) (*AVS_GetAudioFunc)(AVS_Clip *p, gpointer buf, gint64 start, gint64 count);
 typedef AVSC_STRUCT_API(AVS_VideoInfo) (*AVS_GetVideoInfoFunc)(AVS_Clip *);
@@ -457,6 +530,11 @@ typedef AVSC_STRUCT_API(const gchar *) (*AvisynthCPluginInitFunc)(AVS_ScriptEnvi
   #pragma pack(push,8)
 #endif
 
+/**
+ * AVS_ScriptEnvironment:
+ *
+ * A structure that contains C API function pointers.
+ */
 struct _AVS_ScriptEnvironment
 {
 
@@ -470,7 +548,6 @@ struct _AVS_ScriptEnvironment
   __avs_clip_ref avs_clip_ref;
 
   __avs_clip_construct avs_clip_construct;
-/*  __avs_clip_destroy avs_clip_destroy;*/
 
   __avs_clip_get_error avs_clip_get_error;
   __avs_clip_get_version avs_clip_get_version;
@@ -542,7 +619,6 @@ struct _AVS_ScriptEnvironment
  *
  */
 
-/*  __avs_gvf_destroy avs_gvf_destroy; */
   __avs_gvf_construct avs_gvf_construct;
 
 
@@ -578,11 +654,13 @@ struct _AVS_ScriptEnvironment
 
 };
 
-/* VideoFrameBuffer holds information about a memory block which is used
- for video data.
-
- DO NOT USE THIS STRUCTURE DIRECTLY
-*/
+/**
+ * AVS_VideoFrameBuffer:
+ *
+ * Opaque #AVS_VideoFrameBuffer.
+ * VideoFrameBuffer holds information about a memory block which is used
+ * for video data.
+ */
 struct _AVS_VideoFrameBuffer
 {
   guint8* data;
@@ -610,10 +688,12 @@ struct _AVS_VideoFrameBuffer
   gint image_type;
 };
 
-/* VideoFrame holds a "window" into a VideoFrameBuffer.
-
- DO NOT USE THIS STRUCTURE DIRECTLY
-*/
+/**
+ * AVS_VideoFrame:
+ *
+ * Opaque #AVS_VideoFrame.
+ * VideoFrame holds a "window" into a VideoFrameBuffer.
+ */
 struct _AVS_VideoFrame
 {
   gint offset, pitch, row_size, height, offsetU, offsetV, pitchUV;  /* U&V offsets are from top of picture. */
@@ -623,7 +703,12 @@ struct _AVS_VideoFrame
   gint refcount;
 };
 
-/* DO NOT USE THIS STRUCTURE DIRECTLY */
+/**
+ * AVS_VideoInfo:
+ *
+ * Opaque #AVS_VideoInfo.
+ * VideoInfo holds information about video stream.
+ */
 struct _AVS_VideoInfo
 {
   gint width, height;    /* width=0 means no video */
@@ -641,192 +726,143 @@ struct _AVS_VideoInfo
   gint image_type;
 };
 
-struct _AVS_FilterInfo
-{
-  /* these members should not be modified outside of the AVS_ApplyFunc callback */
-  AVS_Clip * child;
-  AVS_VideoInfo vi;
-  AVS_ScriptEnvironment * env;
-
-  /*
-   Should be set whenever there is an error to report.
-   It is cleared before any of the above methods are called
-  */
-  const gchar *error;
-  /*  this is to store an arbitrary value and may be modified at will */
-  gpointer user_data;
-};
-
-struct _AVS_Clip
-{
-  gpointer parent; /* is NULL for AVS_Clip */
-  AVS_Clip *child;
-  AVS_DestroyFunc destroy;
-
-  AVS_GetFrameFunc get_frame;
-  AVS_GetAudioFunc get_audio;
-  AVS_GetVideoInfoFunc get_video_info;
-  AVS_GetParityFunc get_parity;
-  AVS_SetCacheHintsFunc set_cache_hints;
-
-  gchar *error;
-  gint refcount;
-};
-
-struct _AVS_GenericVideoFilter
-{
-  AVS_Clip parent;
-  AVS_Clip *child;
-  AVS_DestroyFunc destroy;
-
-  AVS_Clip *next_clip;
-  AVS_VideoInfo vi;
-};
-
-/*
- * Treat AVS_Value as a fat pointer.  That is use avs_copy_value
- * and avs_release_value appropiaty as you would if AVS_Value was
- * a pointer.
+/**
+ * AVS_HAS_VIDEO:
+ * @p: a pointer to #AVS_VideoInfo
  *
- * To maintain source code compatibility with future versions of the
- * avisynth_c API don't use the AVS_Value directly.  Use the helper
- * functions below.
+ * Returns: TRUE if #AVS_VideoInfo pointed by @p describes a video stream.
  */
-/* DO NOT USE THIS STRUCTURE DIRECTLY */
-struct _AVS_Value
-{
-  gint16 type;  /* 'a'rray, 'c'lip, 'b'ool, 'i'nt, 'f'loat, 's'tring, 'v'oid, or 'l'ong 
-                for some functions it is 'e'rror*/
-  gint16 array_size;
-  union
-  {
-    AVS_Clip *clip; /* do not use directly, use avs_take_clip */
-    gboolean boolean;
-    gint integer;
-    gfloat floating_pt;
-    const gchar *string;
-    AVS_Value *array;
-  } d;
-};
-/*
- * AVS_Value should be initilized with avs_void.
- * Should also be avs_void after its value is released
- * by avs_copy_value.  Consider it the equalvent of setting
- * a pointer to NULL
- */
-static const AVS_Value avs_void = {'v', 0};
-
-/* Example */
-/* Your own filter should start like this:
-
-typedef struct _AVS_MyVideoFilter AVS_MyVideoFilter;
-
-struct _AVS_MyVideoFilter
-{
-  AVS_GenericVideoFilter parent;
-  AVS_Clip *child;
-  AVS_DestroyFunc destroy;
-
-  gint *my_own_property;
-}
-*/
-
-/* And you should implement "destroy" method.
-   It should be like this:
-
-void AVSC_CC
-my_destroy(gpointer p, gboolean freeself)
-{
-  AVS_MyVideoFilter *mvf = (AVS_MyVideoFilter *)p;
-  
-  g_free (my_own_property);
-
-  mvf->parent.destroy (&mvf->parent, FALSE);
-
-  if (freeself)
-    g_free (mvf);
-}
-*/
-/* Then you should implement a constructor, which
-   allocates, initializes your object,
-   calls parent constructor, assigns the destructor
-   and optionally overrides some base class methods:
-
-AVS_MyVideoFilter AVSC_CC
-my_construct(gpointer p, AVS_Clip *next)
-{
-  AVS_MyVideoFilter *mvf;
-  AVS_Clip *clip_self;
-
-  if (!p)
-    mvf = g_new0 (AVS_MyVideoFilter, 1);
-  else
-    mvf = p;
-
-  mvf->destroy = my_destroy;
-  mvf->child = NULL;
-
-  clip_self = (AVS_Clip *)mvf;
-  
-  if (!clip_self->get_frame)
-    clip_self->get_frame = my_get_frame;
-  if (!clip_self->get_video_info)
-    clip_self->get_video_info = my_get_video_info;
-  if (!clip_self->get_parity)
-    clip_self->get_parity = my_get_parity;
-
-  _avs_gvf_construct (&mvf->parent, next);
-
-  mvf->parent.child = clip_self;
-
-  mvf->my_own_property = g_new0 (gint, 10);
-
-  return mvf;
-}
-*/
-#ifdef _MSC_VER
-  #pragma pack(pop)
-#endif
-
-/****
- *
- * AVS_VideoInfo
- */
-
-
-/* useful functions of the above */
 #define AVS_HAS_VIDEO(p) ((p)->width != 0)
 
+/**
+ * AVS_HAS_AUDIO:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if #AVS_VideoInfo pointed by @p describes an audio stream.
+ */
 #define AVS_HAS_AUDIO(p) (AVS_AUDIO_SAMPLES_PER_SECOND (p) != 0)
 
+/**
+ * AVS_IS_RGB:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video is in one of the RGB colorspace.
+ */
 #define AVS_IS_RGB(p) (!!((p)->pixel_type & AVS_CS_BGR))
 
+/**
+ * AVS_IS_RGB24:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video is in #AVS_CS_RGB24 colorspace.
+ */
 #define AVS_IS_RGB24(p) (((p)->pixel_type & AVS_CS_BGR24) == AVS_CS_BGR24)
 
+/**
+ * AVS_IS_RGB32:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video is in #AVS_CS_RGB32 colorspace.
+ */
 #define AVS_IS_RGB32(p) (((p)->pixel_type & AVS_CS_BGR32) == AVS_CS_BGR32)
 
+/**
+ * AVS_IS_YUV:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video is in one of the YUV colorspaces.
+ */
 #define AVS_IS_YUV(p) (!!((p)->pixel_type & AVS_CS_YUV ))
 
+/**
+ * AVS_IS_YUY2:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video is in #AVS_CS_YUY2 colorspace.
+ */
 #define AVS_IS_YUY2(p) (((p)->pixel_type & AVS_CS_YUY2) == AVS_CS_YUY2)
 
+/**
+ * AVS_IS_YV12:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video is in #AVS_CS_YV12 or #AVS_CS_I420 colorspace.
+ */
 #define AVS_IS_YV12(p) ((((p)->pixel_type & AVS_CS_YV12) == AVS_CS_YV12) || (((p)->pixel_type & AVS_CS_I420) == AVS_CS_I420))
 
+/**
+ * AVS_IS_YUY2:
+ * @p: a pointer to #AVS_VideoInfo
+ * @c_space: #AVS_Colorspace to compare to
+ *
+ * Returns: TRUE if video colorspace is the same as @c_space.
+ */
 #define AVS_IS_COLOR_SPACE(p, c_space) (((p)->pixel_type & c_space) == c_space)
 
+/**
+ * AVS_IS_PROPERTY:
+ * @p: a pointer to #AVS_VideoInfo
+ * @property: an #AVS_ColorspaceProperty
+ *
+ * Returns: TRUE if @property is set in the video.
+ */
 #define AVS_IS_PROPERTY(p, property) (((p)->pixel_type & property) == property)
 
+/**
+ * AVS_IS_PLANAR:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video is planar (#AVS_CS_PLANAR is set).
+ */
 #define AVS_IS_PLANAR(p) (!!((p)->pixel_type & AVS_CS_PLANAR))
         
+/**
+ * AVS_IS_FIELD_BASED:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video is field-based (#AVS_CS_FIELDBASED is set).
+ */
 #define AVS_IS_FIELD_BASED(p) (!!((p)->image_type & AVS_IT_FIELDBASED))
 
+/**
+ * AVS_IS_PARITY_KNOWN:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video parity is known (#AVS_CS_FIELDBASED is set and
+ * either #AVS_IT_BFF or #AVS_IT_TFF is set).
+ */
 #define AVS_IS_PARITY_KNOWN(p) (((p)->image_type & AVS_IT_FIELDBASED) && ((p)->image_type & (AVS_IT_BFF | AVS_IT_TFF)))
 
+/**
+ * AVS_IS_BFF:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video parity bottom-field-first (#AVS_IT_BFF is set).
+ */
 #define AVS_IS_BFF(p) (!!((p)->image_type & AVS_IT_BFF))
 
+/**
+ * AVS_IS_TFF:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video parity top-field-first (#AVS_IT_TFF is set).
+ */
 #define AVS_IS_TFF(p) (!!((p)->image_type & AVS_IT_TFF))
 
+/**
+ * AVS_IS_VPLANE_FIRST:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: TRUE if video is planar YUV and ordered as YVU.
+ */
 #define AVS_IS_VPLANE_FIRST(p) (((p)->pixel_type & AVS_CS_YV12) == AVS_CS_YV12)
 
+/**
+ * AVS_BITS_PER_PIXEL:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: number of bits per pixel of video frame.
+ */
 #define AVS_BITS_PER_PIXEL(p) ( \
 (p)->pixel_type == AVS_CS_BGR24 ? 24 : \
 (p)->pixel_type == AVS_CS_BGR32 ? 32 : \
@@ -834,17 +870,48 @@ my_construct(gpointer p, AVS_Clip *next)
 (p)->pixel_type == AVS_CS_YV12 ? 12 : \
 (p)->pixel_type == AVS_CS_I420 ? 12 : 0 \
                                )
+/**
+ * AVS_BYTES_FROM_PIXELS:
+ * @p: a pointer to #AVS_VideoInfo
+ * @pixels: number of pixels
+ *
+ * Returns: number of bytes occupied by @pixels number of pixels.
+ */
 #define AVS_BYTES_FROM_PIXELS(p, pixels) (pixels * (AVS_BITS_PER_PIXEL(p) >> 3))  /* Will work on planar images, but will return only luma planes */
 
+/**
+ * AVS_ROW_SIZE:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: length (in bytes) of a row of the video frame.
+ */
 #define AVS_ROW_SIZE(p) (AVS_BYTES_FROM_PIXELS (p, (p)->width))  /* Also only returns first plane on planar images */
 
+/**
+ * AVS_BMP_SIZE:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: size (in bytes) of the video frame in BMP format.
+ */
 #define AVS_BMP_SIZE(p) ( \
 AVS_IS_PLANAR (p) ? (p)->height * ( (AVS_ROW_SIZE (p) + 3) & ~3) + (((p)->height * ( (AVS_ROW_SIZE (p) + 3) & ~3)) >> 1) : \
 (p)->height * ( (AVS_ROW_SIZE (p) + 3) & ~3) \
 )
 
+/**
+ * AVS_SAMPLES_PER_SECOND:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: number of audio samples per second.
+ */
 #define AVS_SAMPLES_PER_SECOND(p) AVS_AUDIO_SAMPLES_PER_SECOND(p)
 
+/**
+ * AVS_BYTES_PER_CHANNEL_SAMPLE:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: number of bytes occupied by one audio sample in one channel.
+ */
 #define AVS_BYTES_PER_CHANNEL_SAMPLE(p) ( \
 (p)->sample_type == AVS_SAMPLE_INT8 ? sizeof (gint8) : \
 (p)->sample_type == AVS_SAMPLE_INT16 ? sizeof (gint16) : \
@@ -853,6 +920,12 @@ AVS_IS_PLANAR (p) ? (p)->height * ( (AVS_ROW_SIZE (p) + 3) & ~3) + (((p)->height
 (p)->sample_type == AVS_SAMPLE_FLOAT ? sizeof (gfloat) : 0 \
 )
 
+/**
+ * AVS_BYTES_PER_AUDIO_SAMPLE:
+ * @p: a pointer to #AVS_VideoInfo
+ *
+ * Returns: number of bytes occupied by one audio sample in all channels.
+ */
 #define AVS_BYTES_PER_AUDIO_SAMPLE(p) ((p)->nchannels * AVS_BYTES_PER_CHANNEL_SAMPLE (p))
 
 #define AVS_AUDIO_SAMPLES_FROM_FRAMES(p, frames) ( (frames) * AVS_SAMPLES_PER_SECOND (p) * (p)->fps_denominator / (p)->fps_numerator)
@@ -867,15 +940,43 @@ AVS_IS_PLANAR (p) ? (p)->height * ( (AVS_ROW_SIZE (p) + 3) & ~3) + (((p)->height
 
 #define AVS_SAMPLE_TYPE(p) ( (p)->sample_type )
 
-/* useful mutator */
+/**
+ * AVS_MIX_PARITY:
+ * @p: a pointer to #AVS_VideoInfo
+ * @parity: an #AVS_Parity to mix
+ *
+ * Returns: sets @parity flag(s).
+ */
 #define AVS_MIX_PARITY(p, parity) ((p)->image_type |= parity)
 
+/**
+ * AVS_FORCE_PARITY:
+ * @p: a pointer to #AVS_VideoInfo
+ * @parity: an #AVS_Parity to force
+ *
+ * Returns: sets @parity flag(s) and unsets all other parity flags.
+ */
 #define AVS_FORCE_PARITY(p, parity) ((p)->image_type &= ~parity)
 
+/**
+ * AVS_SET_FIELD_BASED:
+ * @p: a pointer to #AVS_VideoInfo
+ * @isfieldbased: TRUE or FALSE
+ *
+ * Returns: sets or unsets #AVS_CS_FIELDBASED.
+ */
 #define AVS_SET_FIELD_BASED(p, isfieldbased) ( \
 isfieldbased ? (p)->image_type |= AVS_IT_FIELDBASED : \
 (p)->image_type &= ~AVS_IT_FIELDBASED )
 
+/**
+ * AVS_SET_FIELD_BASED:
+ * @p: a pointer to #AVS_VideoInfo
+ * @num: FPS numerator
+ * @den: FPS denominator
+ *
+ * Returns: sets video to @num/@den FPS.
+ */
 #define AVS_SET_FPS(p, num, den) \
 { \
   unsigned x = numerator, y = denominator; \
@@ -888,7 +989,15 @@ isfieldbased ? (p)->image_type |= AVS_IT_FIELDBASED : \
   (p)->fps_denominator = denominator / x; \
 }
 
-/* Range protected multiply-divide of FPS */
+/**
+ * AVS_MUL_DIV_FPS:
+ * @p: a pointer to #AVS_VideoInfo
+ * @multiplier: FPS multiplier
+ * @divisor: FPS divisor
+ *
+ * Range protected multiply-divide of FPS.
+ * Multiplies FPS numerator by @multiplier and denominator by @divisor.
+ */
 #define AVS_MUL_DIV_FPS (p, multiplier, divisor) { \
   __uint64 numerator = ((__int64) (p)->fps_numerator) * ((__int64) multiplier); \
   __uint64 denominator = ((__int64) (p)->fps_denominator) * ((__int64) divisor); \
@@ -917,30 +1026,263 @@ isfieldbased ? (p)->image_type |= AVS_IT_FIELDBASED : \
   } \
 }
 
+/**
+ * AVS_IS_SAME_COLORSPACE:
+ * @x: a pointer to #AVS_VideoInfo
+ * @y: a pointer to another #AVS_VideoInfo
+ *
+ * Returns: TRUE if @x and @y have the same colorspace.
+ */
 #define AVS_IS_SAME_COLORSPACE(x, y) (((x)->pixel_type == (y)->pixel_type) || (AVS_IS_YV12 (x) && AVS_IS_YV12 (y)))
 
-/************
- *
- * AVS_Value
- */
 
+/**
+ * AVS_FilterInfo:
+ *
+ * Opaque #AVS_FilterInfo.
+ * This structure is not used.
+ */
+struct _AVS_FilterInfo
+{
+  /* these members should not be modified outside of the AVS_ApplyFunc callback */
+  AVS_Clip * child;
+  AVS_VideoInfo vi;
+  AVS_ScriptEnvironment * env;
+
+  /*
+   Should be set whenever there is an error to report.
+   It is cleared before any of the above methods are called
+  */
+  const gchar *error;
+  /*  this is to store an arbitrary value and may be modified at will */
+  gpointer user_data;
+};
+
+/**
+ * AVS_Clip:
+ * @parent: AVS_Clip does not have a parent, this is always NULL
+ * @child: Pointer to derived class/object
+ * @destroy: AVS_Clip class/object destructor
+ *
+ * @get_frame: GetFrame() method pointer
+ * @get_audio: GetAudio() method pointer
+ * @get_video_info: GetVideoInfo() method pointer
+ * @get_parity: GetParity() method pointer
+ * @set_cache_hints: SetCacheHints() method pointer
+ *
+ * @error: Error string
+ * @refcount: reference counter
+ *
+ * This structure describes AVS_Clip class/object.
+ */
+struct _AVS_Clip
+{
+  gpointer parent; /* is NULL for AVS_Clip */
+  AVS_Clip *child;
+  AVS_DestroyFunc destroy;
+
+  AVS_GetFrameFunc get_frame;
+  AVS_GetAudioFunc get_audio;
+  AVS_GetVideoInfoFunc get_video_info;
+  AVS_GetParityFunc get_parity;
+  AVS_SetCacheHintsFunc set_cache_hints;
+
+  gchar *error;
+  gint refcount;
+};
+
+/**
+ * AVS_GenericVideoFilter:
+ * @parent: Parent #AVS_Clip object/class
+ * @child: Pointer to derived object/class
+ * @destroy: AVS_GenericVideoFilter class/object destructor
+ *
+ * @next_clip: Pointer to the next #AVS_Clip in filter chain
+ * @vi: #AVS_VideoInfo that contains information about video stream
+ *
+ * This structure describes AVS_GenericVideoFilter class/object.
+ */
+struct _AVS_GenericVideoFilter
+{
+  AVS_Clip parent;
+  AVS_Clip *child;
+  AVS_DestroyFunc destroy;
+
+  AVS_Clip *next_clip;
+  AVS_VideoInfo vi;
+};
+
+/* DO NOT USE THIS STRUCTURE DIRECTLY */
+/**
+ * AVS_Value:
+ *
+ * Opaque #AVS_Value.
+ *
+ * Treat AVS_Value as a fat pointer.  That is use #avs_val_copy
+ * and #avs_val_release appropiaty as you would if AVS_Value was
+ * a pointer.
+ *
+ * To maintain source code compatibility with future versions of the
+ * GstAVSynth C API don't use the AVS_Value directly.  Use the helper
+ * functions (the ones that start with "avs_val_") and macros.
+ */
+struct _AVS_Value
+{
+  gint16 type;  /* 'a'rray, 'c'lip, 'b'ool, 'i'nt, 'f'loat, 's'tring, 'v'oid, or 'l'ong 
+                for some functions it is 'e'rror*/
+  gint16 array_size;
+  union
+  {
+    AVS_Clip *clip; /* do not use directly, use avs_take_clip */
+    gboolean boolean;
+    gint integer;
+    gfloat floating_pt;
+    const gchar *string;
+    AVS_Value *array;
+  } d;
+};
+
+/**
+ * AVS_DEFINED:
+ * @v: an #AVS_Value
+ *
+ * Returns: TRUE if value is defined (was set to something), FALSE otherwise.
+ */
 #define AVS_DEFINED(v) (v.type != 'v')
+
+/**
+ * AVS_IS_CLIP:
+ * @v: an #AVS_Value
+ *
+ * Returns: TRUE if value is of type 'clip'.
+ */
 #define AVS_IS_CLIP(v) (v.type == 'c')
+
+/**
+ * AVS_IS_BOOL:
+ * @v: an #AVS_Value
+ *
+ * Returns: TRUE if value is of type 'boolean'.
+ */
 #define AVS_IS_BOOL(v) (v.type == 'b')
+
+/**
+ * AVS_IS_INT:
+ * @v: an #AVS_Value
+ *
+ * Returns: TRUE if value is of type 'integer'.
+ */
 #define AVS_IS_INT(v) (v.type == 'i')
+
+/**
+ * AVS_IS_FLOAT:
+ * @v: an #AVS_Value
+ *
+ * Returns: TRUE if value is of type 'float' or 'integer'.
+ */
 #define AVS_IS_FLOAT(v) (v.type == f || v.type == 'i')
+
+/**
+ * AVS_IS_STRING:
+ * @v: an #AVS_Value
+ *
+ * Returns: TRUE if value is of type 'string'.
+ */
 #define AVS_IS_STRING(v) (v.type == 's')
+
+/**
+ * AVS_IS_ARRAY:
+ * @v: an #AVS_Value
+ *
+ * Returns: TRUE if value is of type 'array'.
+ */
 #define AVS_IS_ARRAY(v) (v.type == 'a')
+
+/**
+ * AVS_IS_ERROR:
+ * @v: an #AVS_Value
+ *
+ * Returns: TRUE if value is of type 'error'.
+ */
 #define AVS_IS_ERROR(v) (v.type == 'e')
 
+/**
+ * AVS_AS_BOOL:
+ * @v: an #AVS_Value
+ *
+ * Returns: a boolean value of @v.
+ */
 #define AVS_AS_BOOL(v) (v.d.boolean)
+
+/**
+ * AVS_AS_INT:
+ * @v: an #AVS_Value
+ *
+ * Returns: an integer value of @v.
+ */
 #define AVS_AS_INT(v) (v.d.integer)
-#define AVS_AS_STRING(v) (AVS_IS_ERROR(v) ? v.d.string : NULL)
+
+/**
+ * AVS_AS_STRING:
+ * @v: an #AVS_Value
+ *
+ * Returns: a string value of @v (@v must be of type 'string' or 'error').
+ */
+#define AVS_AS_STRING(v) (AVS_IS_ERROR(v) || AVS_IS_STRING(v) ? v.d.string : NULL)
+
+/**
+ * AVS_AS_FLOAT:
+ * @v: an #AVS_Value
+ *
+ * Returns: a floating-point value of @v (@v must be of type 'int' or 'float').
+ */
 #define AVS_AS_FLOAT(v) (AVS_IS_INT(v) ? v.d.integer : v.d.floating_pt)
+
+/**
+ * AVS_AS_ERROR:
+ * @v: an #AVS_Value
+ *
+ * Returns: an error value of @v (a string).
+ */
 #define AVS_AS_ERROR(v) (AVS_IS_ERROR (v) ? v.d.string : NULL)
+
+/**
+ * AVS_AS_ARRAY:
+ * @v: an #AVS_Value
+ *
+ * Returns: an array value of @v (a pointer).
+ */
 #define AVS_AS_ARRAY(v) (v.d.array)
+
+/**
+ * AVS_ARRAY_SIZE:
+ * @v: an #AVS_Value
+ *
+ * Returns: size of the array of @v (or 1 if @v is not of type 'array').
+ */
 #define AVS_ARRAY_SIZE(v) (AVS_IS_ARRAY(v) ? v.array_size : 1)
+
+/**
+ * AVS_ARRAY_ELT:
+ * @v: an #AVS_Value
+ * @i: an index of the element within array
+ *
+ * Returns: the @i'th #AVS_Value in the array @v, or @v itself, if @v is not
+ * of type 'array'.
+ */
 #define AVS_ARRAY_ELT(v, i) (AVS_IS_ARRAY(v) ? (v).d.array[i] : v)
+
+/*
+ * AVS_Value should be initilized with avs_void.
+ * Should also be avs_void after its value is released
+ * by avs_copy_value.  Consider it the equalvent of setting
+ * a pointer to NULL
+ */
+static const AVS_Value avs_void = {'v', 0};
+
+#ifdef _MSC_VER
+  #pragma pack(pop)
+#endif
 
 #endif /* __GSTAVSYNTH_SDK_C_H__ */
 

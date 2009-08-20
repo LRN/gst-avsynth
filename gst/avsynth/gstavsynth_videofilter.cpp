@@ -1167,6 +1167,20 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
   avsynth_video_filter->plugin = g_module_open (full_filename, (GModuleFlags) G_MODULE_BIND_LAZY);
 
   g_free (full_filename);
+
+  avsynth_video_filter->env_cpp = NULL;
+  avsynth_video_filter->shutdown_cpp = NULL;
+  avsynth_video_filter->shutdown_data_cpp = NULL;
+  avsynth_video_filter->apply_cpp = NULL;
+  avsynth_video_filter->user_data_cpp = NULL;
+
+  avsynth_video_filter->env_c = NULL;
+  avsynth_video_filter->shutdown_c = NULL;
+  avsynth_video_filter->shutdown_data_c = NULL;
+  avsynth_video_filter->apply_c = NULL;
+  avsynth_video_filter->user_data_c = NULL;
+
+  avsynth_video_filter->uninitialized = TRUE;
   
   GST_LOG ("Getting AvisynthPluginInit2...");
   if (!oclass->c)
@@ -1265,20 +1279,6 @@ gst_avsynth_video_filter_init (GstAVSynthVideoFilter *avsynth_video_filter)
     avsynth_video_filter->args[i] = NULL;
     avsynth_video_filter->args_c[i].type = 'v';
   }
-
-  avsynth_video_filter->env_cpp = NULL;
-  avsynth_video_filter->shutdown_cpp = NULL;
-  avsynth_video_filter->shutdown_data_cpp = NULL;
-  avsynth_video_filter->apply_cpp = NULL;
-  avsynth_video_filter->user_data_cpp = NULL;
-
-  avsynth_video_filter->env_c = NULL;
-  avsynth_video_filter->shutdown_c = NULL;
-  avsynth_video_filter->shutdown_data_c = NULL;
-  avsynth_video_filter->apply_c = NULL;
-  avsynth_video_filter->user_data_c = NULL;
-
-  avsynth_video_filter->uninitialized = TRUE;
 
   avsynth_video_filter->seeksegment.time = GST_CLOCK_TIME_NONE;
   avsynth_video_filter->seeksegment.start = GST_CLOCK_TIME_NONE;
